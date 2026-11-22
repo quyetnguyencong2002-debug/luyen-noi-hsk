@@ -434,8 +434,8 @@ function renderPTest(){
    <div style="height:6px;border-radius:99px;background:var(--line);overflow:hidden;margin:8px 0"><i style="display:block;height:100%;width:${T.i/N*100}%;background:var(--jade)"></i></div>
    <div class="card" style="text-align:center;padding:20px 14px"><span class="small muted">${secName}</span><h3 style="margin:6px 0 10px;text-transform:none;letter-spacing:0;color:var(--ink);font-size:1rem">${q.title}</h3>${prompt}
      ${q.type==='py2hz'||q.type==='hz2vi'?'':''}</div>
-   <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px">${q.opts.map((o,i)=>`<button class="btn" data-i="${i}" style="${o.han?"font-family:'Noto Serif SC',serif;font-size:1.3rem":''}">${esc(o.t)}</button>`).join('')}</div>
-   <p class="muted small" style="margin-top:8px">Cần từ 90% để qua bài.</p>`;
+   <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px">${q.opts.map((o,i)=>`<button class="btn" data-i="${i}" style="${o.han?"font-family:'Noto Serif SC',serif;font-size:1.3rem":''}"><small style="opacity:.6;margin-right:6px">${i+1}</small>${esc(o.t)}</button>`).join('')}</div>
+   <p class="muted small" style="margin-top:8px">Cần từ 90% để qua bài. Bấm phím <b>1</b>–<b>4</b> để chọn đáp án.</p>`;
   $('#pquit').onclick=()=>{ SUB=null; render(); };
   V.querySelectorAll('[data-i]').forEach(b=>b.onclick=()=>{ T.ans[T.i]=+b.dataset.i; T.i++; if(T.i>=N) finishPTest(); renderPTest(); });
 }
@@ -550,7 +550,13 @@ function renderSettings(){
 }
 window.addEventListener('hashchange',()=>{ const h=location.hash.slice(1); if(h&&h!==view&&['hoi-thoai','luyen','on-tu','tien-bo','cai-dat'].includes(h)) go(h); });
 document.addEventListener('keydown',e=>{
-  if(view!=='on-tu'||SUB||e.ctrlKey||e.metaKey||e.altKey) return;
+  if(e.ctrlKey||e.metaKey||e.altKey) return;
+  const tg=e.target; if(tg&&(/^(INPUT|TEXTAREA|SELECT)$/.test(tg.tagName)||tg.isContentEditable)) return;
+  if(view==='luyen'&&SUB&&SUB.ptest&&!SUB.ptest.done){
+    if(['1','2','3','4'].includes(e.key)){ const b=V.querySelector(`[data-i="${+e.key-1}"]`); if(b){ e.preventDefault(); b.click(); } }
+    return;
+  }
+  if(view!=='on-tu'||SUB) return;
   const t=e.target; if(t&&(/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)||t.isContentEditable)) return;
   if(!SR.cur) return;
   if(!SR.shown){ if(e.key===' '||e.key==='Enter'){ e.preventDefault(); SR.shown=true; renderSRS(); if(SR.cur) playRef(SR.cur.hz); } return; }
