@@ -387,7 +387,7 @@ function renderSettings(){
     <div class="field">Key (Key 1 của tài nguyên Speech)<input id="k" type="password" autocomplete="off" value="${esc(ST.az.key)}" placeholder="Dán key vào đây"></div>
     <div class="field">Khu vực (Region)<select id="rg">${REGIONS.map(r=>`<option ${r===ST.az.region?'selected':''}>${r}</option>`).join('')}</select></div>
     <div class="row"><button class="btn pri" id="test">Lưu &amp; kiểm tra</button><span id="tr" class="small muted">${ST.az.ok?'✓ Đã kết nối':''}</span></div>
-    <p class="note">Key chỉ lưu trên máy này, không gửi đi đâu ngoài máy chủ Azure của Microsoft. Lần kiểm tra dùng giọng mẫu “你好”, không cần nói.</p>
+    <p class="note">Key chỉ lưu trên máy này, không gửi đi đâu ngoài máy chủ Azure của Microsoft. Lần kiểm tra dùng một câu giọng mẫu có sẵn, không cần nói.</p>
     <details><summary><b>Cách lấy key miễn phí (5 phút)</b></summary><ol class="steps">
      <li>Vào <b>portal.azure.com</b>, đăng ký tài khoản Microsoft Azure miễn phí (cần thẻ để xác minh; gói Free không trừ tiền).</li>
      <li>Ô tìm kiếm trên cùng → gõ <b>Speech services</b> → <b>Create</b>.</li>
@@ -407,8 +407,8 @@ function renderSettings(){
     if(!ST.az.key){ tr.textContent='Chưa nhập key.'; render(); return; }
     if(!window.SpeechSDK){ tr.textContent='Thư viện Azure chưa tải xong, thử lại sau vài giây.'; return; }
     tr.innerHTML='<span class="spin"></span> Đang kiểm tra…';
-    try{ const b=await refBuffer('你好'); const x=await to16k(b); const j=await azAssess(x,'你好'); const r=azPerChar(j,'你好');
-      if(!r) throw new Error('Không có kết quả'); ST.az.ok=true; save(); tr.textContent=`✓ Kết nối được. Giọng mẫu “你好” đạt ${Math.round(r.pron)} điểm.`; $('#azb').textContent='Chấm Azure'; $('#azb').classList.add('on'); }
+    try{ const T='您好！我叫乔。'; const b=await refBuffer(T); if(!b) throw new Error('chưa tải được giọng mẫu, kiểm tra mạng rồi thử lại'); const x=await to16k(b); const j=await azAssess(x,T); if(j&&j.nomatch) throw new Error('Azure không nhận ra giọng mẫu'); const r=azPerChar(j,T);
+      if(!r) throw new Error('Không có kết quả'); ST.az.ok=true; save(); tr.textContent=`✓ Kết nối được. Giọng mẫu “您好！我叫乔。” đạt ${Math.round(r.pron)} điểm.`; $('#azb').textContent='Chấm Azure'; $('#azb').classList.add('on'); }
     catch(e){ tr.textContent='✗ Chưa được: '+(/401|403|Unauthorized|invalid subscription/i.test(e.message)?'key hoặc region chưa đúng.':e.message); } };
   $('#sv').onclick=()=>{ ST.prof.name=$('#nm').value.trim()||'乔'; ST.rate=+$('#rt').value; save(); toast('Đã lưu.'); };
   $('#exp').onclick=()=>{ const d={...ST,az:{region:ST.az.region}}; const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([JSON.stringify(d)],{type:'application/json'})); a.download='luyen-noi-tien-do.json'; a.click(); };
