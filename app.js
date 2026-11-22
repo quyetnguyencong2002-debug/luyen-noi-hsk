@@ -564,22 +564,35 @@ function hanInfoHTML(hz){
   if(!cs.length) return '';
   return `<div style="background:var(--sunk);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:6px">${cs.map(c=>{ const d=HZD[c]; return `<div class="small"><b style="font-family:'Noto Serif SC',serif;font-size:1.2rem;color:var(--ink)">${esc(c)}</b> <span style="color:var(--seal);font-weight:700;letter-spacing:.08em">${esc(d.hv)}</span>${d.comp?` · <span class="muted">${esc(d.comp)}</span>`:''}${d.mn?`<div class="muted" style="margin-top:2px">${esc(d.mn)}</div>`:''}</div>`; }).join('')}</div>`;
 }
-const STKSVG=(paths,size)=>`<svg viewBox="0 0 1024 1024" width="${size}" height="${size}" style="border:1px solid var(--line);border-radius:8px;background:var(--surface)"><g transform="translate(0,900) scale(1,-1)">${paths.map((d,i)=>`<path d="${d}" fill="none" stroke="var(--ink)" stroke-width="48" stroke-linecap="round" stroke-linejoin="round"/>`).join('')}</g></svg>`;
-function playStrokes(svg){
-  if(!svg) return; const ps=[...svg.querySelectorAll('path')]; let t=0;
-  ps.forEach(p=>{ const L=p.getTotalLength(); p.style.strokeDasharray=L; p.style.strokeDashoffset=L; p.style.transition='none'; });
-  ps.forEach(p=>{ setTimeout(()=>{ p.style.transition='stroke-dashoffset .5s ease'; p.style.strokeDashoffset=0; },t); t+=600; });
-}
+/* ---------- Thứ tự nét: dùng HanziWriter như artifact Sổ Từ HSK ---------- */
+let HWP=null;
+function loadHW(){ if(window.HanziWriter) return Promise.resolve(); if(!HWP) HWP=new Promise((res,rej)=>{ const s=document.createElement('script'); s.src='https://cdn.jsdelivr.net/npm/hanzi-writer@3.7.2/dist/hanzi-writer.min.js'; s.onload=()=>res(); s.onerror=()=>{ HWP=null; rej(new Error('hw')); }; document.head.appendChild(s); }); return HWP; }
 async function showStrokes(hz){
   const box=$('#srs-strokes'); if(!box) return;
   if(box.dataset.open===hz){ box.innerHTML=''; box.dataset.open=''; return; }
   box.dataset.open=hz; box.innerHTML='<p class="muted small"><span class="spin"></span> Đang tải thứ tự nét…</p>';
-  let D; try{ D=await loadStrokes(); }catch(e){ box.innerHTML='<p class="small muted">Không tải được dữ liệu nét (cần mạng). Thử lại sau.</p>'; return; }
+  let D, ok=true; try{ [D]=await Promise.all([loadStrokes(),loadHW()]); }catch(e){ box.innerHTML='<p class="small muted">Không tải được dữ liệu nét (cần mạng). Thử lại sau.</p>'; return; }
   if(box.dataset.open!==hz) return;
-  const cs=[...new Set([...hz].filter(c=>/[㐀-鿿]/.test(c)))];
-  box.innerHTML=`<div style="display:flex;flex-wrap:wrap;gap:12px;justify-content:center;margin-top:8px">${cs.map((c,k)=>{ const s=D[c]; return s?`<div style="display:flex;flex-direction:column;align-items:center;gap:6px" data-cell="${k}">${STKSVG(s,160)}<button class="btn sm" data-play="${k}">▶ Xem lại nét</button><span class="small muted">${s.length} nét</span></div>`:`<p class="small muted">Chưa có dữ liệu nét cho ${esc(c)}.</p>`; }).join('')}</div>`;
-  box.querySelectorAll('[data-play]').forEach(b=>b.onclick=()=>playStrokes(box.querySelector(`[data-cell="${b.dataset.play}"] svg`)));
-  box.querySelectorAll('[data-cell] svg').forEach(s=>playStrokes(s));
+  const cs=[...new Set([...hz].filter(c=>HANRE.test(c)))].filter(c=>D[c]);
+  if(!cs.length){ box.innerHTML='<p class="small muted">Chưa có dữ liệu nét cho các chữ này.</p>'; return; }
+  box.innerHTML=`<div style="display:flex;flex-wrap:wrap;gap:12px;justify-content:center;margin-top:8px">${cs.map((c,k)=>`<div style="display:flex;flex-direction:column;align-items:center;gap:6px"><div data-ch="${esc(c)}" style="width:150px;height:150px;border:1px solid var(--line);border-radius:10px;background:var(--surface)"></div><span class="small muted">${esc(c)} · ${D[c].strokes.length} nét</span></div>`).join('')}</div>
+    <div class="row" style="justify-content:center;margin-top:8px"><button class="btn sm" id="sw-play">▶ Xem lại nét</button><button class="btn sm" id="sw-quiz" aria-pressed="false">✍ Tập viết</button></div>`;
+  const tok=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  const opts={width:150,height:150,padding:8,showCharacter:false,showOutline:true,strokeAnimationSpeed:1.1,delayBetweenStrokes:180,
+    strokeColor:tok('--ink'),radicalColor:tok('--seal'),outlineColor:tok('--line'),highlightColor:tok('--jade'),drawingColor:tok('--jade'),drawingWidth:5,showHintAfterMisses:2,
+    charDataLoader:(c,onLoad,onErr)=>D[c]?onLoad(D[c]):onErr()};
+  let ws=[];
+  try{ ws=[...box.querySelectorAll('[data-ch]')].map(el=>HanziWriter.create(el, el.dataset.ch, opts)); }catch(e){ box.innerHTML='<p class="small muted">Không khởi tạo được bộ vẽ nét.</p>'; return; }
+  let run=0;
+  const play=()=>{ const id=++run; let i=0; ws.forEach(x=>x.hideCharacter());
+    const next=()=>{ if(id!==run||i>=ws.length) return; ws[i++].animateCharacter({onComplete:()=>setTimeout(next,250)}); }; next(); };
+  $('#sw-play').onclick=play;
+  const qb=$('#sw-quiz'); let quizzing=false, left=0, miss=0;
+  const stopQuiz=()=>{ quizzing=false; qb.setAttribute('aria-pressed','false'); ws.forEach(x=>{ try{ x.cancelQuiz(); }catch(e){} }); };
+  qb.onclick=()=>{ if(quizzing){ stopQuiz(); return; } quizzing=true; qb.setAttribute('aria-pressed','true'); left=ws.length; miss=0; run++;
+    ws.forEach(x=>{ x.hideCharacter(); x.quiz({onMistake:()=>miss++, onComplete:()=>{ if(--left===0){ quizzing=false; qb.setAttribute('aria-pressed','false'); toast(miss?`Viết xong, sai ${miss} nét. Bấm Tập viết để thử lại.`:'Viết đúng toàn bộ nét!'); } }}); });
+    toast('Vẽ từng nét theo đúng thứ tự lên ô chữ. Sai 2 lần sẽ có gợi ý.'); };
+  setTimeout(play,300);
 }
 
 
@@ -712,7 +725,7 @@ function renderSRS(){
   V.querySelectorAll('[data-g]').forEach(b=>b.onclick=()=>srsGrade(+b.dataset.g));
 }
 
-render(); loadData().then(render).catch(()=>{ V.innerHTML='<p>Không tải được dữ liệu. Kiểm tra mạng rồi tải lại trang.</p>'; });
+render(); loadData().then(render).catch(e=>{ console.error('LN',e&&e.stack); V.innerHTML='<p>Không tải được dữ liệu. Kiểm tra mạng rồi tải lại trang.</p>'; });
 if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});
 window.__LN={ST,azPerChar,toneCompare,assess:x=>assess(x),get CUR(){return CUR;}};
 }
