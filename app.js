@@ -582,6 +582,43 @@ async function showStrokes(hz){
   box.querySelectorAll('[data-cell] svg').forEach(s=>playStrokes(s));
 }
 
+
+/* ---------- Tra từ trong câu mẫu: chạm vào từ để xem pinyin, Hán Việt, nghĩa ---------- */
+let WDICT=null;
+function wdict(){ if(!WDICT){ WDICT={}; allWords().forEach(w=>{ if(!WDICT[w.hz]) WDICT[w.hz]=w; }); } return WDICT; }
+const HANRE=/[㐀-鿿]/;
+function segSentence(s){
+  const D=wdict(), arr=[...(s||'')], out=[]; let i=0;
+  while(i<arr.length){
+    let hit=null;
+    for(let L=Math.min(4,arr.length-i); L>=2; L--){ const t=arr.slice(i,i+L).join(''); if(D[t]){ hit=L; break; } }
+    if(hit){ out.push(arr.slice(i,i+hit).join('')); i+=hit; }
+    else { out.push(arr[i]); i++; }
+  }
+  return out;
+}
+function segHTML(s){
+  return segSentence(s).map(t=>HANRE.test(t)?`<span class="tk" data-t="${esc(t)}" style="cursor:pointer;border-bottom:1px dotted var(--muted);border-radius:3px;padding:0 1px">${esc(t)}</span>`:esc(t)).join('');
+}
+function tokInfoHTML(t){
+  const D=wdict(), chars=[...t].filter(c=>HANRE.test(c)), d=D[t];
+  const hv=chars.map(c=>HZD[c]?HZD[c].hv:'').filter(Boolean).join(' ');
+  const per=chars.length>1?`<div class="small muted" style="margin-top:6px">${chars.map(c=>{ const dc=D[c]; const hc=HZD[c]; return `<span style="margin-right:12px"><b style="font-family:'Noto Serif SC',serif;color:var(--ink)">${esc(c)}</b> ${dc?`<span style="color:var(--jade)">${esc(dc.py)}</span> `:''}${hc?`<span style="color:var(--seal);font-weight:700">${esc(hc.hv)}</span>`:''}</span>`; }).join('')}</div>`:'';
+  return `<div style="margin-top:10px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px 12px">
+    <div class="row" style="gap:10px"><b style="font-family:'Noto Serif SC',serif;font-size:1.5rem">${esc(t)}</b>${d?`<span style="color:var(--jade);font-weight:600;font-size:1.1rem">${esc(d.py)}</span>`:'<span class="muted small">chưa có pinyin trong bộ từ</span>'}</div>
+    <div class="small" style="margin-top:4px">Hán Việt: <b style="color:var(--seal);letter-spacing:.06em">${esc(hv||'—')}</b></div>
+    <div style="margin-top:4px">Nghĩa: ${d?`<b>${esc(d.vi)}</b>`:'<span class="muted small">chưa có nghĩa trong bộ từ, xem từng chữ bên dưới</span>'}</div>${per}</div>`;
+}
+function bindTokens(){
+  V.querySelectorAll('.tk').forEach(el=>el.onclick=()=>{
+    const box=$('#tok-info'); if(!box) return;
+    const same=box.dataset.t===el.dataset.t;
+    V.querySelectorAll('.tk').forEach(x=>x.style.background='');
+    if(same){ box.innerHTML=''; box.dataset.t=''; return; }
+    el.style.background='var(--jade-soft)'; box.dataset.t=el.dataset.t; box.innerHTML=tokInfoHTML(el.dataset.t);
+  });
+}
+
 /* ---------- Ôn từ: thẻ lặp lại ngắt quãng (SM-2 rút gọn, theo Sổ Từ HSK) ---------- */
 const SRSKEY='luyennoi-srs-v1';
 let SR={c:{}, day:null, newPerDay:20, cur:null, shown:false};
@@ -650,7 +687,7 @@ function srsDeckCard(){
       <div style="text-align:center;padding:18px 14px 12px"><div style="font-size:4.2rem;line-height:1.1;font-family:'Noto Serif SC',serif">${esc(w.hz)}</div>${SR.shown?'':'<p class="muted small" style="margin:6px 0 0">Tự nhớ nghĩa rồi bấm hiện đáp án</p>'}</div>
       ${SR.shown?`<div style="border-top:1px dashed var(--line);padding:14px;display:flex;flex-direction:column;gap:10px">
         <div class="row" style="justify-content:space-between"><div><div style="font-size:1.25rem;color:var(--jade);font-weight:600">${esc(w.py)}</div><div style="font-size:1.1rem;font-weight:600">${esc(w.vi)}</div></div><span style="font-size:2rem">${esc(w.em||'')}</span></div>
-        ${w.ex?`<div style="background:var(--sunk);border-radius:10px;padding:10px 12px"><div style="font-family:'Noto Serif SC',serif;font-size:1.15rem">${esc(w.ex)}</div><div class="small" style="color:var(--jade)">${esc(w.exp||'')}</div><div class="small muted">${esc(w.exv||'')}</div></div>`:''}
+        ${w.ex?`<div style="background:var(--sunk);border-radius:10px;padding:10px 12px"><div style="font-family:'Noto Serif SC',serif;font-size:1.15rem;line-height:1.9">${segHTML(w.ex)}</div><div id="tok-info"></div><div class="small" style="color:var(--jade)">${esc(w.exp||'')}</div><div class="small muted">${esc(w.exv||'')}</div></div>`:''}
         ${hanInfoHTML(w.hz)}
         <div class="row" style="justify-content:center"><button class="btn sm" id="srs-play">🔊 Nghe giọng mẫu</button><button class="btn sm" id="srs-strk">✍ Thứ tự nét</button></div>
         <div id="srs-strokes"></div>
@@ -668,6 +705,7 @@ function srsDeckCard(){
 }
 function renderSRS(){
   V.innerHTML=srsDeckCard();
+  bindTokens();
   const sh=$('#srs-show'); if(sh) sh.onclick=()=>{ SR.shown=true; renderSRS(); if(SR.cur) playRef(SR.cur.hz); };
   const sk=$('#srs-strk'); if(sk) sk.onclick=()=>showStrokes(SR.cur.hz);
   const pl=$('#srs-play'); if(pl) pl.onclick=()=>{ if(SR.cur) playRef(SR.cur.hz); };
