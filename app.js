@@ -290,7 +290,7 @@ function logAttempt(tg,L){
 }
 
 /* ---------- Màn hình ---------- */
-let view=['hoi-thoai','luyen','tien-bo','cai-dat'].includes(location.hash.slice(1))?location.hash.slice(1):'hoi-thoai', SUB=null;
+let view=['hoi-thoai','luyen','on-tu','tien-bo','cai-dat'].includes(location.hash.slice(1))?location.hash.slice(1):'hoi-thoai', SUB=null;
 function go(v,sub){ view=v; SUB=sub||null; CUR=null; micUI(false); stopPlay(); try{ history.replaceState(null,'','#'+v); }catch(e){} render(); window.scrollTo(0,0); }
 document.querySelectorAll('nav.tabs button').forEach(b=>b.onclick=()=>go(b.dataset.v));
 function render(){
@@ -299,6 +299,7 @@ function render(){
   if(!HSK){ V.innerHTML='<p class="muted"><span class="spin"></span> Đang tải dữ liệu…</p>'; return; }
   if(view==='hoi-thoai') return SUB?renderChat():renderScenarios();
   if(view==='luyen') return SUB&&SUB.item!=null?renderDrill():SUB&&SUB.lesson?renderLesson():renderLessons();
+  if(view==='on-tu') return renderSRS();
   if(view==='tien-bo') return renderProgress();
   return renderSettings();
 }
@@ -426,8 +427,97 @@ function renderSettings(){
   $('#exp').onclick=()=>{ const d={...ST,az:{region:ST.az.region}}; const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([JSON.stringify(d)],{type:'application/json'})); a.download='luyen-noi-tien-do.json'; a.click(); };
   $('#imp').onchange=async e=>{ const f=e.target.files[0]; if(!f) return; try{ const d=JSON.parse(await f.text()); ST.hist=(d.hist||[]).concat(ST.hist).sort((a,b)=>a.t-b.t); ST.done=Object.assign({},d.done||{},ST.done); ST.weak=Object.assign({},d.weak||{},ST.weak); save(); toast('Đã nhập tiến độ.'); render(); }catch(err){ toast('File không hợp lệ.'); } };
 }
-window.addEventListener('hashchange',()=>{ const h=location.hash.slice(1); if(h&&h!==view&&['hoi-thoai','luyen','tien-bo','cai-dat'].includes(h)) go(h); });
+window.addEventListener('hashchange',()=>{ const h=location.hash.slice(1); if(h&&h!==view&&['hoi-thoai','luyen','on-tu','tien-bo','cai-dat'].includes(h)) go(h); });
 document.addEventListener('visibilitychange',()=>{ if(document.hidden&&!REC.on) micClose(); });
+
+/* ---------- Ôn từ: thẻ lặp lại ngắt quãng (SM-2 rút gọn, theo Sổ Từ HSK) ---------- */
+const SRSKEY='luyennoi-srs-v1';
+let SR={c:{}, day:null, newPerDay:20, cur:null, shown:false};
+try{ const s=JSON.parse(localStorage.getItem(SRSKEY)||'null'); if(s) SR=Object.assign(SR,s); }catch(e){}
+function srsSave(){ try{ localStorage.setItem(SRSKEY,JSON.stringify({c:SR.c,day:SR.day,newPerDay:SR.newPerDay})); }catch(e){} }
+const MINS=6e4, DAYS=864e5, STEPS=[1,10], RELEARN=10, GRAD=1, EASY_GRAD=4, START_EF=2.5, MIN_EF=1.3, MATURE=21;
+const todayN=()=>Math.floor((Date.now()-new Date().getTimezoneOffset()*MINS)/DAYS);
+function dayS(){ const t=todayN(); if(!SR.day||SR.day.d!==t) SR.day={d:t,n:0,r:0}; return SR.day; }
+function allWords(){ const out=[]; if(!HSK) return out; for(const L of HSK) for(const les of L.lessons) for(const it of les.items){ out.push({id:it.hz,hz:it.hz,py:it.py,vi:it.vi,em:it.em,ex:it.ex,exp:it.exp,exv:it.exv,lv:L.lv,lesson:les.k,title:les.title}); } return out; }
+function srsSchedule(c0,g,now){
+  const t=todayN(); const c=c0?{...c0}:{q:'new',st:0,iv:0,ef:START_EF,r:0,l:0};
+  if(c.q==='new'||c.q==='learn'){
+    if(g===0){ c.q='learn'; c.st=0; c.due=now+STEPS[0]*MINS; }
+    else if(g===1){ c.q='learn'; c.due=now+(c.st===0?Math.round((STEPS[0]+STEPS[1])/2):STEPS[c.st])*MINS; }
+    else if(g===2){ if(c.st+1<STEPS.length){ c.q='learn'; c.st++; c.due=now+STEPS[c.st]*MINS; } else { c.q='review'; c.iv=GRAD; c.dd=t+c.iv; } }
+    else { c.q='review'; c.iv=EASY_GRAD; c.dd=t+c.iv; }
+  } else if(c.q==='relearn'){
+    if(g<=1){ c.due=now+RELEARN*MINS; } else { c.q='review'; if(g===3) c.iv+=1; c.dd=t+c.iv; }
+  } else {
+    if(g===0){ c.l++; c.ef=Math.max(MIN_EF,c.ef-.2); c.iv=1; c.q='relearn'; c.due=now+RELEARN*MINS; }
+    else if(g===1){ c.ef=Math.max(MIN_EF,c.ef-.15); c.iv=Math.max(c.iv+1,Math.round(c.iv*1.2)); c.dd=t+c.iv; }
+    else if(g===2){ c.iv=Math.max(c.iv+1,Math.round(c.iv*c.ef)); c.dd=t+c.iv; }
+    else { c.ef+=.15; c.iv=Math.max(c.iv+2,Math.round(c.iv*c.ef*1.3)); c.dd=t+c.iv; }
+  }
+  c.r++; return c;
+}
+function fmtDaysN(d){ return d<30?d+' ngày':d<365?(d/30).toFixed(1).replace('.',',')+' tháng':(d/365).toFixed(1).replace('.',',')+' năm'; }
+function srsNext(c,g,now){ const n=srsSchedule(c,g,now); if(n.q==='learn'||n.q==='relearn'){ const m=Math.round((n.due-now)/MINS); return m<1?'< 1 phút':m<60?m+' phút':Math.round(m/60)+' giờ'; } return fmtDaysN(n.iv); }
+function srsBuckets(){
+  const now=Date.now(), t=todayN(), learn=[], rev=[], fresh=[], W=allWords();
+  for(const w of W){ const c=SR.c[w.id];
+    if(!c){ fresh.push(w); continue; }
+    if(c.q==='review'){ if(c.dd<=t) rev.push(w); } else if(c.due<=now) learn.push(w);
+  }
+  return {learn,rev,fresh,total:W.length};
+}
+function srsPick(){
+  const b=srsBuckets(), now=Date.now();
+  const due=[...b.learn.sort((x,y)=>SR.c[x.id].due-SR.c[y.id].due), ...b.rev];
+  if(due.length) return due[0];
+  if(dayS().n<SR.newPerDay && b.fresh.length) return b.fresh[Math.floor(Math.random()*Math.min(b.fresh.length,50))];
+  return null;
+}
+function srsGrade(g){
+  const w=SR.cur; if(!w||!SR.shown) return;
+  const d=dayS(); if(!SR.c[w.id]) d.n++; d.r++;
+  SR.c[w.id]=srsSchedule(SR.c[w.id],g,Date.now()); srsSave();
+  SR.shown=false; SR.cur=srsPick(); renderSRS();
+}
+function srsDeckCard(){
+  if(!HSK) return '<p class="muted"><span class="spin"></span> Đang tải dữ liệu…</p>';
+  const b=srsBuckets(), d=dayS(), mature=Object.values(SR.c).filter(c=>c.q==='review'&&c.iv>=MATURE).length;
+  const pct=b.total?Math.round(mature/b.total*100):0;
+  const left=Math.max(0,SR.newPerDay-d.n);
+  if(!SR.cur) SR.cur=srsPick();
+  const w=SR.cur;
+  let card;
+  if(!w){
+    card=`<div class="card" style="text-align:center;padding:28px 16px"><h2>Xong lượt hôm nay</h2><p class="muted small" style="margin:8px 0 0">Đã ôn ${d.r} lần. Hẹn lại vào ngày mai, hoặc tăng số từ mới mỗi ngày trong Cài đặt.</p></div>`;
+  } else {
+    const c=SR.c[w.id], stage=!c?'Từ mới':c.q==='review'?(c.iv>=MATURE?'Đã thuộc':'Đang nhớ'):'Đang học';
+    const now=Date.now();
+    const grades=[[0,'Lại','Lại'],[1,'Khó','Khó'],[2,'Được','Được'],[3,'Dễ','Dễ']].map(([g,label])=>`<button class="btn ${g===2?'pri':''}" data-g="${g}" style="flex-direction:column;gap:2px;padding:8px 4px"><b>${label}</b><span class="small" style="font-weight:400;opacity:.85">${srsNext(c,g,now)}</span></button>`).join('');
+    card=`<div class="card" style="padding:0;overflow:hidden">
+      <div style="display:flex;justify-content:space-between;padding:10px 14px" class="small muted"><span>${esc(w.title)} · Bài ${w.lesson} · HSK ${w.lv}</span><span>${stage}</span></div>
+      <div style="text-align:center;padding:18px 14px 12px"><div style="font-size:4.2rem;line-height:1.1;font-family:'Noto Serif SC',serif">${esc(w.hz)}</div>${SR.shown?'':'<p class="muted small" style="margin:6px 0 0">Tự nhớ nghĩa rồi bấm hiện đáp án</p>'}</div>
+      ${SR.shown?`<div style="border-top:1px dashed var(--line);padding:14px;display:flex;flex-direction:column;gap:10px">
+        <div class="row" style="justify-content:space-between"><div><div style="font-size:1.25rem;color:var(--jade);font-weight:600">${esc(w.py)}</div><div style="font-size:1.1rem;font-weight:600">${esc(w.vi)}</div></div><span style="font-size:2rem">${esc(w.em||'')}</span></div>
+        ${w.ex?`<div style="background:var(--sunk);border-radius:10px;padding:10px 12px"><div style="font-family:'Noto Serif SC',serif;font-size:1.15rem">${esc(w.ex)}</div><div class="small" style="color:var(--jade)">${esc(w.exp||'')}</div><div class="small muted">${esc(w.exv||'')}</div></div>`:''}
+        <div class="row" style="justify-content:center"><button class="btn sm" id="srs-play">🔊 Nghe giọng mẫu</button></div>
+        <div class="grades" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">${grades}</div></div>`
+      :`<div style="padding:0 14px 14px"><button class="btn pri" id="srs-show" style="width:100%">Hiện đáp án</button></div>`}
+    </div>`;
+  }
+  return `<div class="row" style="justify-content:space-between;margin-bottom:8px"><h2>Ôn từ</h2><span class="small muted">Còn ${left} từ mới hôm nay</span></div>
+   <div class="card" style="margin-bottom:12px"><div class="row" style="justify-content:space-between" class="small">
+     <span class="small">Cần ôn: <b>${b.learn.length+b.rev.length}</b></span><span class="small">Từ mới: <b>${b.fresh.length}</b></span><span class="small">Đã thuộc: <b>${mature}</b> (${pct}%)</span></div>
+     <div style="height:6px;border-radius:99px;background:var(--line);overflow:hidden;margin-top:8px"><i style="display:block;height:100%;width:${pct}%;background:var(--jade)"></i></div></div>
+   ${card}
+   <p class="muted small" style="margin-top:10px">Nhớ kỹ: nghĩ trước khi xem đáp án, rồi chấm trung thực. "Lại" nghĩa là chưa nhớ, từ sẽ quay lại trong vài phút.</p>`;
+}
+function renderSRS(){
+  V.innerHTML=srsDeckCard();
+  const sh=$('#srs-show'); if(sh) sh.onclick=()=>{ SR.shown=true; renderSRS(); if(SR.cur) playRef(SR.cur.hz); };
+  const pl=$('#srs-play'); if(pl) pl.onclick=()=>{ if(SR.cur) playRef(SR.cur.hz); };
+  V.querySelectorAll('[data-g]').forEach(b=>b.onclick=()=>srsGrade(+b.dataset.g));
+}
+
 render(); loadData().then(render).catch(()=>{ V.innerHTML='<p>Không tải được dữ liệu. Kiểm tra mạng rồi tải lại trang.</p>'; });
 if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});
 window.__LN={ST,azPerChar,toneCompare,assess:x=>assess(x),get CUR(){return CUR;}};
