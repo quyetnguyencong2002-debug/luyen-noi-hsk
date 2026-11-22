@@ -549,6 +549,13 @@ function renderSettings(){
   $('#imp').onchange=async e=>{ const f=e.target.files[0]; if(!f) return; try{ const d=JSON.parse(await f.text()); ST.hist=(d.hist||[]).concat(ST.hist).sort((a,b)=>a.t-b.t); ST.done=Object.assign({},d.done||{},ST.done); ST.weak=Object.assign({},d.weak||{},ST.weak); save(); toast('Đã nhập tiến độ.'); render(); }catch(err){ toast('File không hợp lệ.'); } };
 }
 window.addEventListener('hashchange',()=>{ const h=location.hash.slice(1); if(h&&h!==view&&['hoi-thoai','luyen','on-tu','tien-bo','cai-dat'].includes(h)) go(h); });
+document.addEventListener('keydown',e=>{
+  if(view!=='on-tu'||SUB||e.ctrlKey||e.metaKey||e.altKey) return;
+  const t=e.target; if(t&&(/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)||t.isContentEditable)) return;
+  if(!SR.cur) return;
+  if(!SR.shown){ if(e.key===' '||e.key==='Enter'){ e.preventDefault(); SR.shown=true; renderSRS(); if(SR.cur) playRef(SR.cur.hz); } return; }
+  if(['1','2','3','4'].includes(e.key)){ e.preventDefault(); srsGrade(+e.key-1); }
+});
 document.addEventListener('visibilitychange',()=>{ if(document.hidden&&!REC.on) micClose(); });
 
 /* ---------- Hán Việt, bộ thủ, thứ tự nét ---------- */
@@ -637,7 +644,7 @@ function srsDeckCard(){
   } else {
     const c=SR.c[w.id], stage=!c?'Từ mới':c.q==='review'?(c.iv>=MATURE?'Đã thuộc':'Đang nhớ'):'Đang học';
     const now=Date.now();
-    const grades=[[0,'Lại','Lại'],[1,'Khó','Khó'],[2,'Được','Được'],[3,'Dễ','Dễ']].map(([g,label])=>`<button class="btn ${g===2?'pri':''}" data-g="${g}" style="flex-direction:column;gap:2px;padding:8px 4px"><b>${label}</b><span class="small" style="font-weight:400;opacity:.85">${srsNext(c,g,now)}</span></button>`).join('');
+    const grades=[[0,'Lại','Lại'],[1,'Khó','Khó'],[2,'Được','Được'],[3,'Dễ','Dễ']].map(([g,label])=>`<button class="btn ${g===2?'pri':''}" data-g="${g}" style="flex-direction:column;gap:2px;padding:8px 4px"><small style="opacity:.7">${g+1}</small><b>${label}</b><span class="small" style="font-weight:400;opacity:.85">${srsNext(c,g,now)}</span></button>`).join('');
     card=`<div class="card" style="padding:0;overflow:hidden">
       <div style="display:flex;justify-content:space-between;padding:10px 14px" class="small muted"><span>${esc(w.title)} · Bài ${w.lesson} · HSK ${w.lv}</span><span>${stage}</span></div>
       <div style="text-align:center;padding:18px 14px 12px"><div style="font-size:4.2rem;line-height:1.1;font-family:'Noto Serif SC',serif">${esc(w.hz)}</div>${SR.shown?'':'<p class="muted small" style="margin:6px 0 0">Tự nhớ nghĩa rồi bấm hiện đáp án</p>'}</div>
@@ -648,7 +655,7 @@ function srsDeckCard(){
         <div class="row" style="justify-content:center"><button class="btn sm" id="srs-play">🔊 Nghe giọng mẫu</button><button class="btn sm" id="srs-strk">✍ Thứ tự nét</button></div>
         <div id="srs-strokes"></div>
         <div class="grades" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">${grades}</div></div>`
-      :`<div style="padding:0 14px 14px"><button class="btn pri" id="srs-show" style="width:100%">Hiện đáp án</button></div>`}
+      :`<div style="padding:0 14px 14px"><button class="btn pri" id="srs-show" style="width:100%">Hiện đáp án <small style="opacity:.7">(Space / Enter)</small></button></div>`}
     </div>`;
   }
   return `<div class="row" style="justify-content:space-between;margin-bottom:8px"><h2>Ôn hôm nay</h2><span class="small muted">Còn ${left} từ mới hôm nay</span></div>
@@ -657,7 +664,7 @@ function srsDeckCard(){
      <div style="height:6px;border-radius:99px;background:var(--line);overflow:hidden;margin-top:8px"><i style="display:block;height:100%;width:${pct}%;background:var(--jade)"></i></div></div>
    ${forecastHTML()}
    ${card}
-   <p class="muted small" style="margin-top:10px">Nhớ kỹ: nghĩ trước khi xem đáp án, rồi chấm trung thực. "Lại" nghĩa là chưa nhớ, từ sẽ quay lại trong vài phút.</p>`;
+   <p class="muted small" style="margin-top:10px">Phím tắt: <b>Space</b> hoặc <b>Enter</b> để hiện đáp án, rồi <b>1</b> Lại · <b>2</b> Khó · <b>3</b> Được · <b>4</b> Dễ. Nghĩ trước khi xem đáp án, rồi chấm trung thực.</p>`;
 }
 function renderSRS(){
   V.innerHTML=srsDeckCard();
