@@ -450,7 +450,8 @@ function finishPTest(){
 }
 function nextTestOf(id){
   if(String(id)[0]==='f'){ const lv=+String(id).slice(1); const nx=PATH.find(x=>x.lv===lv+1&&x.k===1); return nx?{id:nx.n,name:`Bài 1 · ${nx.t} (HSK ${nx.lv})`}:null; }
-  const L=PATH.find(x=>x.n===id); const nx=PATH.find(x=>x.n===id+1&&x.lv===L.lv);
+  const n=+id, L=PATH.find(x=>x.n===n); if(!L) return null;
+  const nx=PATH.find(x=>x.n===n+1&&x.lv===L.lv);
   if(nx) return {id:nx.n,name:`Bài ${nx.k} · ${nx.t}`};
   return {id:'f'+L.lv,name:`Thi thử HSK ${L.lv}`};
 }
@@ -546,7 +547,7 @@ function renderSettings(){
     <div class="row"><button class="btn" id="sv">Lưu</button><button class="btn" id="exp">Xuất tiến độ</button><label class="btn" style="cursor:pointer">Nhập tiến độ<input type="file" id="imp" accept=".json" hidden></label></div>
     <div class="field">Đồng bộ từ Sổ Từ HSK: dán đoạn đã sao chép từ mục “Xuất tiến trình sang ứng dụng Luyện nói”<textarea id="swin" placeholder="Dán đoạn JSON vào đây" style="min-height:90px;font-size:.8rem"></textarea></div>
     <div class="row"><button class="btn" id="swgo">Nhập tiến trình từ Sổ Từ HSK</button></div>
-    <p class="note">Tiến độ lưu trong trình duyệt của máy này. Dùng Xuất/Nhập để chuyển sang máy khác. Phiên bản ứng dụng: v13.</p>
+    <p class="note">Tiến độ lưu trong trình duyệt của máy này. Dùng Xuất/Nhập để chuyển sang máy khác. Phiên bản ứng dụng: v14.</p>
    </div>`;
   $('#test').onclick=async()=>{ ST.az.key=$('#k').value.trim(); ST.az.region=$('#rg').value; ST.az.ok=false; save(); const tr=$('#tr');
     if(!ST.az.key){ tr.textContent='Chưa nhập key.'; render(); return; }
