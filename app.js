@@ -79,8 +79,20 @@ function toWav16(x){ const n=x.length, b=new ArrayBuffer(44+n*2), v=new DataView
   for(let i=0;i<n;i++){ const s=Math.max(-1,Math.min(1,x[i])); v.setInt16(44+i*2,s<0?s*0x8000:s*0x7fff,true); } return b; }
 
 /* ---------- Azure Pronunciation Assessment ---------- */
-const azReady=()=>!!(ST.az.key&&ST.az.region&&window.SpeechSDK);
-function azAssess(x,ref){
+const azReady=()=>!!(ST.az.key&&ST.az.region);
+async function azRest(x,ref){
+  const cfg={ReferenceText:ref||'',GradingSystem:'HundredMark',Granularity:'Phoneme',Dimension:'Comprehensive',EnableMiscue:!!ref,NBestPhonemeCount:5,PhonemeAlphabet:'SAPI'};
+  const b64=btoa(unescape(encodeURIComponent(JSON.stringify(cfg))));
+  const url=`https://${ST.az.region}.stt.speech.microsoft.com/speech/recognition/conversation/cognitiveservices/v1?language=zh-CN&format=detailed`;
+  let r; try{ r=await fetch(url,{method:'POST',headers:{'Ocp-Apim-Subscription-Key':ST.az.key.trim(),'Content-Type':'audio/wav; codecs=audio/pcm; samplerate=16000','Pronunciation-Assessment':b64,'Accept':'application/json'},body:toWav16(x)}); }
+  catch(e){ const er=new Error('Không kết nối được máy chủ Azure (mạng/tường lửa chặn?)'); er.net=true; throw er; }
+  if(r.status===401||r.status===403) throw new Error('Key hoặc Region chưa đúng (HTTP '+r.status+'). Kiểm tra lại KEY 1 và Region = southeastasia.');
+  if(r.status===429) throw new Error('Đã hết lượt miễn phí tạm thời (HTTP 429), thử lại sau ít phút.');
+  if(!r.ok) throw new Error('Azure trả lỗi HTTP '+r.status);
+  const j=await r.json(); if(j.RecognitionStatus&&j.RecognitionStatus!=='Success') return {nomatch:true}; return j;
+}
+async function azAssess(x,ref){ try{ return await azRest(x,ref); }catch(e){ if(e.net&&window.SpeechSDK) return azSdk(x,ref); throw e; } }
+function azSdk(x,ref){
   return new Promise((resolve,reject)=>{
     const S=window.SpeechSDK; if(!S) return reject(new Error('SDK chưa tải xong'));
     const cfg=S.SpeechConfig.fromSubscription(ST.az.key.trim(),ST.az.region); cfg.speechRecognitionLanguage='zh-CN'; cfg.outputFormat=S.OutputFormat.Detailed;
@@ -101,15 +113,15 @@ function azAssess(x,ref){
 // Đổi kết quả Azure thành từng chữ: {hz, acc, err, t0, t1, ph:[{p,acc,nb}]}
 function azPerChar(j,target){
   const nb=j&&j.NBest&&j.NBest[0]; if(!nb) return null;
-  const pa=nb.PronunciationAssessment||{}, out=[];
+  const pa=nb.PronunciationAssessment||nb, out=[];
   for(const w of nb.Words||[]){
-    const wp=w.PronunciationAssessment||{}, cs=chars(w.Word), syl=w.Syllables||[], phs=w.Phonemes||[];
+    const wp=w.PronunciationAssessment||w, cs=chars(w.Word), syl=w.Syllables||[], phs=w.Phonemes||[];
     const T=o=>o.Offset/1e7, D=o=>o.Duration/1e7;
     cs.forEach((hz,k)=>{
       const s=syl[k]; let t0,t1;
       if(s&&s.Offset!=null){ t0=T(s); t1=t0+D(s); } else if(w.Offset!=null){ const a=T(w), d=D(w)/Math.max(1,cs.length); t0=a+k*d; t1=t0+d; }
-      const ph=phs.filter(p=>p.Offset!=null&&t0!=null?(T(p)>=t0-0.01&&T(p)<t1-0.005):false).map(p=>({p:p.Phoneme,acc:(p.PronunciationAssessment||{}).AccuracyScore,nb:((p.PronunciationAssessment||{}).NBestPhonemes||[]).map(x=>({p:x.Phoneme,s:x.Score}))}));
-      out.push({hz,acc:s&&s.PronunciationAssessment?s.PronunciationAssessment.AccuracyScore:wp.AccuracyScore,err:wp.ErrorType||'None',t0,t1,ph,sy:s&&s.Syllable});
+      const ph=phs.filter(p=>p.Offset!=null&&t0!=null?(T(p)>=t0-0.01&&T(p)<t1-0.005):false).map(p=>({p:p.Phoneme,acc:(p.PronunciationAssessment||p).AccuracyScore,nb:((p.PronunciationAssessment||p).NBestPhonemes||[]).map(x=>({p:x.Phoneme,s:x.Score}))}));
+      out.push({hz,acc:s?(s.PronunciationAssessment||s).AccuracyScore:wp.AccuracyScore,err:wp.ErrorType||'None',t0,t1,ph,sy:s&&s.Syllable});
     });
   }
   // gióng theo câu đích (miscue có thể chèn/bỏ chữ)
@@ -405,7 +417,7 @@ function renderSettings(){
    </div>`;
   $('#test').onclick=async()=>{ ST.az.key=$('#k').value.trim(); ST.az.region=$('#rg').value; ST.az.ok=false; save(); const tr=$('#tr');
     if(!ST.az.key){ tr.textContent='Chưa nhập key.'; render(); return; }
-    if(!window.SpeechSDK){ tr.textContent='Thư viện Azure chưa tải xong, thử lại sau vài giây.'; return; }
+    
     tr.innerHTML='<span class="spin"></span> Đang kiểm tra…';
     try{ const T='您好！我叫乔。'; const b=await refBuffer(T); if(!b) throw new Error('chưa tải được giọng mẫu, kiểm tra mạng rồi thử lại'); const x=await to16k(b); const j=await azAssess(x,T); if(j&&j.nomatch) throw new Error('Azure không nhận ra giọng mẫu'); const r=azPerChar(j,T);
       if(!r) throw new Error('Không có kết quả'); ST.az.ok=true; save(); tr.textContent=`✓ Kết nối được. Giọng mẫu “您好！我叫乔。” đạt ${Math.round(r.pron)} điểm.`; $('#azb').textContent='Chấm Azure'; $('#azb').classList.add('on'); }
