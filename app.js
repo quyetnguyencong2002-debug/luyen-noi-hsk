@@ -524,6 +524,8 @@ function renderSettings(){
     <div class="field">Tên tiếng Trung<input id="nm" value="${esc(ST.prof.name)}"></div>
     <div class="field">Tốc độ giọng mẫu<select id="rt">${[[0.8,'Chậm'],[0.9,'Hơi chậm'],[1,'Bình thường']].map(([v,l])=>`<option value="${v}" ${ST.rate==v?'selected':''}>${l}</option>`).join('')}</select></div>
     <div class="row"><button class="btn" id="sv">Lưu</button><button class="btn" id="exp">Xuất tiến độ</button><label class="btn" style="cursor:pointer">Nhập tiến độ<input type="file" id="imp" accept=".json" hidden></label></div>
+    <div class="field">Đồng bộ từ Sổ Từ HSK: dán đoạn đã sao chép từ mục “Xuất tiến trình sang ứng dụng Luyện nói”<textarea id="swin" placeholder="Dán đoạn JSON vào đây" style="min-height:90px;font-size:.8rem"></textarea></div>
+    <div class="row"><button class="btn" id="swgo">Nhập tiến trình từ Sổ Từ HSK</button></div>
     <p class="note">Tiến độ lưu trong trình duyệt của máy này. Dùng Xuất/Nhập để chuyển sang máy khác.</p>
    </div>`;
   $('#test').onclick=async()=>{ ST.az.key=$('#k').value.trim(); ST.az.region=$('#rg').value; ST.az.ok=false; save(); const tr=$('#tr');
@@ -535,6 +537,15 @@ function renderSettings(){
     catch(e){ tr.textContent='✗ Chưa được: '+(/401|403|Unauthorized|invalid subscription/i.test(e.message)?'key hoặc region chưa đúng.':e.message); } };
   $('#sv').onclick=()=>{ ST.prof.name=$('#nm').value.trim()||'乔'; ST.rate=+$('#rt').value; save(); toast('Đã lưu.'); };
   $('#exp').onclick=()=>{ const d={...ST,az:{region:ST.az.region}}; const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([JSON.stringify(d)],{type:'application/json'})); a.download='luyen-noi-tien-do.json'; a.click(); };
+  $('#swgo').onclick=()=>{
+    let d; try{ d=JSON.parse($('#swin').value.trim()); }catch(e){ toast('Đoạn dán không phải JSON hợp lệ.'); return; }
+    if(!d||d.src!=='so-tu-hsk'||!d.c){ toast('Đoạn này không phải tiến trình của Sổ Từ HSK.'); return; }
+    let nc=0, np=0;
+    for(const k in d.c){ const hz=k.replace(/^w:/,''); if(!/^[\u3400-\u9fff]+$/.test(hz)) continue; const a=d.c[k], l=SR.c[hz];
+      if(!l || (a.r||0)>(l.r||0)){ SR.c[hz]={q:a.q,st:a.st||0,iv:a.iv||0,ef:a.ef||2.5,r:a.r||0,l:a.l||0,due:a.due,dd:a.dd}; nc++; } }
+    for(const k in (d.passed||{})){ const a=d.passed[k], l=PT.passed[k]; if(!l||(a.best||0)>(l.best||0)){ PT.passed[k]={best:a.best||0,date:a.date||Date.now()}; np++; } }
+    pSave(); srsSave(); $('#swin').value=''; toast(`Đã nhập ${nc} thẻ và ${np} bài đã qua.`); render();
+  };
   $('#imp').onchange=async e=>{ const f=e.target.files[0]; if(!f) return; try{ const d=JSON.parse(await f.text()); ST.hist=(d.hist||[]).concat(ST.hist).sort((a,b)=>a.t-b.t); ST.done=Object.assign({},d.done||{},ST.done); ST.weak=Object.assign({},d.weak||{},ST.weak); save(); toast('Đã nhập tiến độ.'); render(); }catch(err){ toast('File không hợp lệ.'); } };
 }
 window.addEventListener('hashchange',()=>{ const h=location.hash.slice(1); if(h&&h!==view&&['hoi-thoai','luyen','on-tu','tien-bo','cai-dat'].includes(h)) go(h); });
