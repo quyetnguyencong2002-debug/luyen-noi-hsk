@@ -14,10 +14,11 @@ const HZ=/[\u3400-\u9fff]/;
 const chars=s=>[...(s||'')].filter(c=>HZ.test(c));
 
 /* ---------- Dữ liệu ---------- */
-let HSK=null, DLG=null, AUKEY={};
+let HSK=null, DLG=null, AUKEY={}, HZD={}, STK=null, STKP=null;
+function loadStrokes(){ if(STK) return Promise.resolve(STK); if(!STKP) STKP=fetch('data/strokes.json').then(r=>{ if(!r.ok) throw 0; return r.json(); }).then(j=>(STK=j)).catch(e=>{ STKP=null; throw e; }); return STKP; }
 async function loadData(){
-  const [h,d]=await Promise.all([fetch('data/hsk.json').then(r=>r.json()),fetch('data/dlg.json').then(r=>r.json()).catch(()=>[])]);
-  HSK=h; DLG=d;
+  const [h,d,hz]=await Promise.all([fetch('data/hsk.json').then(r=>r.json()),fetch('data/dlg.json').then(r=>r.json()).catch(()=>[]),fetch('data/hanzi.json').then(r=>r.json()).catch(()=>({}))]);
+  HSK=h; DLG=d; HZD=hz||{};
   for(const L of HSK) for(const les of L.lessons) for(const it of les.items){ AUKEY[it.hz]=les.au; if(it.ex) AUKEY[it.ex]=les.au; }
   for(const s of DLG) for(const t of s.turns){ AUKEY[t.a.zh]='dlg'; for(const u of t.u) AUKEY[u.zh]='dlg'; }
 }
@@ -298,7 +299,7 @@ function render(){
   const azb=$('#azb'); azb.textContent=ST.az.ok?'Chấm Azure':'Chấm cơ bản'; azb.classList.toggle('on',!!ST.az.ok);
   if(!HSK){ V.innerHTML='<p class="muted"><span class="spin"></span> Đang tải dữ liệu…</p>'; return; }
   if(view==='hoi-thoai') return SUB?renderChat():renderScenarios();
-  if(view==='luyen') return SUB&&SUB.item!=null?renderDrill():SUB&&SUB.lesson?renderLesson():renderLessons();
+  if(view==='luyen') return SUB&&SUB.test?renderTest():SUB&&SUB.item!=null?renderDrill():SUB&&SUB.lesson?renderLesson():renderLessons();
   if(view==='on-tu') return renderSRS();
   if(view==='tien-bo') return renderProgress();
   return renderSettings();
@@ -361,10 +362,11 @@ function renderLesson(){
   const les=SUB.lesson, rows=[]; les.items.forEach((it,i)=>{ rows.push({i,kind:'w',zh:it.hz,py:it.py,vi:it.vi,t:it.tw}); if(it.ex) rows.push({i,kind:'e',zh:it.ex,py:it.exp,vi:it.exv,t:it.te}); });
   SUB.rows=rows;
   V.innerHTML=`<div class="row" style="justify-content:space-between"><h2>Bài ${les.k} · ${esc(les.title)}</h2><button class="btn sm" id="back">← Danh sách bài</button></div>
-   <div class="acts" style="justify-content:flex-start;margin:8px 0"><button class="btn pri" id="start">Luyện lần lượt từ đầu</button></div>
+   <div class="acts" style="justify-content:flex-start;margin:8px 0"><button class="btn pri" id="start">Luyện lần lượt từ đầu</button><button class="btn" id="test">📝 Kiểm tra bài</button></div>${testStatusHTML(les)}
    <div class="list">${rows.map((r,k)=>{ const s=ST.done[r.zh]; return `<button class="item" data-r="${k}"><div><div class="z">${esc(r.zh)}</div><div class="p">${esc(r.py)}</div><div class="v">${esc(r.vi)}</div></div><span class="sc ${scCls(s)}">${s==null?'':s}</span></button>`; }).join('')}</div>`;
   $('#back').onclick=()=>go('luyen');
   $('#start').onclick=()=>{ SUB.item=0; render(); };
+  $('#test').onclick=()=>startTest(les);
   V.querySelectorAll('[data-r]').forEach(b=>b.onclick=()=>{ SUB.item=+b.dataset.r; render(); });
 }
 function renderDrill(){
@@ -377,6 +379,52 @@ function renderDrill(){
   $('#next').onclick=()=>{ if(SUB.item<n-1){ SUB.item++; render(); } else { SUB.item=null; CUR=null; micUI(false); render(); toast('Đã xong bài!'); } };
   bindPractice($('#prac'),r); playRef(r.zh);
 }
+/* ---------- Kiểm tra bài: trắc nghiệm 10 câu, đạt từ 80% ---------- */
+const TKEY='luyennoi-test-v1';
+let TESTS={}; try{ TESTS=JSON.parse(localStorage.getItem(TKEY)||'{}'); }catch(e){}
+function tSave(){ try{ localStorage.setItem(TKEY,JSON.stringify(TESTS)); }catch(e){} }
+const shuf2=a=>{ for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; };
+function lessonLv(les){ for(const L of HSK) if(L.lessons.some(x=>x.n===les.n&&x.title===les.title)) return L.lv; return 1; }
+function testKey(les){ return lessonLv(les)+':'+les.n; }
+function testStatusHTML(les){
+  const t=TESTS[testKey(les)]; if(!t) return '<p class="muted small">Chưa kiểm tra bài này.</p>';
+  return `<p class="small" style="color:${t.passed?'var(--jade)':'var(--seal)'}">${t.passed?'✓ Đã đạt':'Chưa đạt'} · điểm cao nhất ${t.best}/${t.of}</p>`;
+}
+function startTest(les){
+  const lv=lessonLv(les), pool=allWords().filter(w=>w.lv===lv);
+  const items=shuf2([...les.items]).slice(0,Math.min(10,les.items.length));
+  const qs=items.map(it=>{ const mode=Math.random()<.5?'hz2vi':'vi2hz';
+    const others=shuf2(pool.filter(w=>w.hz!==it.hz&&w.vi!==it.vi)).slice(0,3).map(w=>mode==='hz2vi'?w.vi:w.hz);
+    const right=mode==='hz2vi'?it.vi:it.hz;
+    return {mode,hz:it.hz,vi:it.vi,right,opts:shuf2([right,...others]),picked:null}; });
+  SUB={lesson:les,test:{qs,i:0,score:0,key:testKey(les)}};
+  render(); window.scrollTo(0,0);
+}
+function renderTest(){
+  const T=SUB.test, les=SUB.lesson, n=T.qs.length;
+  if(T.i>=n){
+    const pct=T.score/n, passed=pct>=.8, prev=TESTS[T.key]||{best:0,of:n,passed:false};
+    TESTS[T.key]={best:Math.max(prev.best,T.score),of:n,passed:prev.passed||passed,date:Date.now()}; tSave();
+    V.innerHTML=`<div class="card" style="text-align:center;padding:24px 16px"><h2>${passed?'Đạt rồi!':'Chưa đạt'}</h2><p style="font-size:2rem;font-weight:700;margin:8px 0">${T.score}/${n}</p><p class="muted small">${passed?'Bạn đã đạt bài này (từ 80% trở lên).':'Cần từ 80% (8/10) để đạt. Ôn lại từ trong bài rồi làm lại.'}</p>
+      <div class="acts" style="justify-content:center;margin-top:12px"><button class="btn" id="again">Làm lại</button><button class="btn pri" id="backl">Về bài học</button></div></div>`;
+    $('#again').onclick=()=>startTest(les); $('#backl').onclick=()=>{ SUB={lesson:les}; render(); };
+    return;
+  }
+  const q=T.qs[T.i];
+  const prompt=q.mode==='hz2vi'
+    ?`<div style="font-family:'Noto Serif SC',serif;font-size:4.5rem;line-height:1.1">${esc(q.hz)}</div><p class="muted small">Chữ này nghĩa là gì?</p>`
+    :`<div style="font-size:1.7rem;font-weight:600">${esc(q.vi)}</div><p class="muted small">Chọn chữ Hán đúng</p>`;
+  const opts=q.opts.map(o=>{ let cls=''; if(q.picked!=null){ if(o===q.right) cls='background:var(--jade);color:var(--surface);border-color:var(--jade)'; else if(o===q.picked) cls='background:var(--bad-soft);border-color:var(--bad)'; }
+    return `<button class="btn" data-o="${esc(o)}" style="${cls};font-family:${q.mode==='vi2hz'?"'Noto Serif SC',serif;font-size:1.6rem":'inherit'}" ${q.picked!=null?'disabled':''}>${esc(o)}</button>`; }).join('');
+  V.innerHTML=`<div class="row" style="justify-content:space-between"><div class="muted small">Bài ${les.k} · Câu ${T.i+1}/${n} · Điểm ${T.score}</div><button class="btn sm" id="back">← Thoát</button></div>
+   <div class="card" style="text-align:center;padding:24px 14px;margin-top:8px">${prompt}</div>
+   <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px">${opts}</div>
+   <div class="acts" style="margin-top:10px">${q.picked!=null?`<button class="btn pri" id="nx">${T.i<n-1?'Câu tiếp →':'Xem kết quả'}</button>`:''}</div>`;
+  $('#back').onclick=()=>{ SUB={lesson:les}; render(); };
+  V.querySelectorAll('[data-o]').forEach(b=>b.onclick=()=>{ if(q.picked!=null) return; q.picked=b.dataset.o; if(q.picked===q.right) T.score++; renderTest(); });
+  const nx=$('#nx'); if(nx) nx.onclick=()=>{ T.i++; renderTest(); };
+}
+
 /* Tiến bộ */
 function weakList(n){ return Object.entries(ST.weak).filter(([k,w])=>w.n>=2&&w.bad>0).map(([k,w])=>({key:k,rate:w.bad/w.n,...w})).sort((a,b)=>b.rate-a.rate||b.bad-a.bad).slice(0,n); }
 function renderProgress(){
@@ -429,6 +477,30 @@ function renderSettings(){
 }
 window.addEventListener('hashchange',()=>{ const h=location.hash.slice(1); if(h&&h!==view&&['hoi-thoai','luyen','on-tu','tien-bo','cai-dat'].includes(h)) go(h); });
 document.addEventListener('visibilitychange',()=>{ if(document.hidden&&!REC.on) micClose(); });
+
+/* ---------- Hán Việt, bộ thủ, thứ tự nét ---------- */
+function hanInfoHTML(hz){
+  const cs=[...new Set([...hz].filter(c=>HZD[c]))];
+  if(!cs.length) return '';
+  return `<div style="background:var(--sunk);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:6px">${cs.map(c=>{ const d=HZD[c]; return `<div class="small"><b style="font-family:'Noto Serif SC',serif;font-size:1.2rem;color:var(--ink)">${esc(c)}</b> <span style="color:var(--seal);font-weight:700;letter-spacing:.08em">${esc(d.hv)}</span>${d.comp?` · <span class="muted">${esc(d.comp)}</span>`:''}${d.mn?`<div class="muted" style="margin-top:2px">${esc(d.mn)}</div>`:''}</div>`; }).join('')}</div>`;
+}
+const STKSVG=(paths,size)=>`<svg viewBox="0 0 1024 1024" width="${size}" height="${size}" style="border:1px solid var(--line);border-radius:8px;background:var(--surface)"><g transform="translate(0,900) scale(1,-1)">${paths.map((d,i)=>`<path d="${d}" fill="none" stroke="var(--ink)" stroke-width="48" stroke-linecap="round" stroke-linejoin="round"/>`).join('')}</g></svg>`;
+function playStrokes(svg){
+  if(!svg) return; const ps=[...svg.querySelectorAll('path')]; let t=0;
+  ps.forEach(p=>{ const L=p.getTotalLength(); p.style.strokeDasharray=L; p.style.strokeDashoffset=L; p.style.transition='none'; });
+  ps.forEach(p=>{ setTimeout(()=>{ p.style.transition='stroke-dashoffset .5s ease'; p.style.strokeDashoffset=0; },t); t+=600; });
+}
+async function showStrokes(hz){
+  const box=$('#srs-strokes'); if(!box) return;
+  if(box.dataset.open===hz){ box.innerHTML=''; box.dataset.open=''; return; }
+  box.dataset.open=hz; box.innerHTML='<p class="muted small"><span class="spin"></span> Đang tải thứ tự nét…</p>';
+  let D; try{ D=await loadStrokes(); }catch(e){ box.innerHTML='<p class="small muted">Không tải được dữ liệu nét (cần mạng). Thử lại sau.</p>'; return; }
+  if(box.dataset.open!==hz) return;
+  const cs=[...new Set([...hz].filter(c=>/[㐀-鿿]/.test(c)))];
+  box.innerHTML=`<div style="display:flex;flex-wrap:wrap;gap:12px;justify-content:center;margin-top:8px">${cs.map((c,k)=>{ const s=D[c]; return s?`<div style="display:flex;flex-direction:column;align-items:center;gap:6px" data-cell="${k}">${STKSVG(s,160)}<button class="btn sm" data-play="${k}">▶ Xem lại nét</button><span class="small muted">${s.length} nét</span></div>`:`<p class="small muted">Chưa có dữ liệu nét cho ${esc(c)}.</p>`; }).join('')}</div>`;
+  box.querySelectorAll('[data-play]').forEach(b=>b.onclick=()=>playStrokes(box.querySelector(`[data-cell="${b.dataset.play}"] svg`)));
+  box.querySelectorAll('[data-cell] svg').forEach(s=>playStrokes(s));
+}
 
 /* ---------- Ôn từ: thẻ lặp lại ngắt quãng (SM-2 rút gọn, theo Sổ Từ HSK) ---------- */
 const SRSKEY='luyennoi-srs-v1';
@@ -499,7 +571,9 @@ function srsDeckCard(){
       ${SR.shown?`<div style="border-top:1px dashed var(--line);padding:14px;display:flex;flex-direction:column;gap:10px">
         <div class="row" style="justify-content:space-between"><div><div style="font-size:1.25rem;color:var(--jade);font-weight:600">${esc(w.py)}</div><div style="font-size:1.1rem;font-weight:600">${esc(w.vi)}</div></div><span style="font-size:2rem">${esc(w.em||'')}</span></div>
         ${w.ex?`<div style="background:var(--sunk);border-radius:10px;padding:10px 12px"><div style="font-family:'Noto Serif SC',serif;font-size:1.15rem">${esc(w.ex)}</div><div class="small" style="color:var(--jade)">${esc(w.exp||'')}</div><div class="small muted">${esc(w.exv||'')}</div></div>`:''}
-        <div class="row" style="justify-content:center"><button class="btn sm" id="srs-play">🔊 Nghe giọng mẫu</button></div>
+        ${hanInfoHTML(w.hz)}
+        <div class="row" style="justify-content:center"><button class="btn sm" id="srs-play">🔊 Nghe giọng mẫu</button><button class="btn sm" id="srs-strk">✍ Thứ tự nét</button></div>
+        <div id="srs-strokes"></div>
         <div class="grades" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">${grades}</div></div>`
       :`<div style="padding:0 14px 14px"><button class="btn pri" id="srs-show" style="width:100%">Hiện đáp án</button></div>`}
     </div>`;
@@ -514,6 +588,7 @@ function srsDeckCard(){
 function renderSRS(){
   V.innerHTML=srsDeckCard();
   const sh=$('#srs-show'); if(sh) sh.onclick=()=>{ SR.shown=true; renderSRS(); if(SR.cur) playRef(SR.cur.hz); };
+  const sk=$('#srs-strk'); if(sk) sk.onclick=()=>showStrokes(SR.cur.hz);
   const pl=$('#srs-play'); if(pl) pl.onclick=()=>{ if(SR.cur) playRef(SR.cur.hz); };
   V.querySelectorAll('[data-g]').forEach(b=>b.onclick=()=>srsGrade(+b.dataset.g));
 }
