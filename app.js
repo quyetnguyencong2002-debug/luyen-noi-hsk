@@ -1,0 +1,422 @@
+/* Luyện Nói HSK — micro trực tiếp, chấm phát âm bằng Azure (key của người dùng, gói Free) + đường thanh điệu tính trên máy. */
+{
+const $=s=>document.querySelector(s), V=$('#view');
+const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const SPK='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4z" fill="currentColor" stroke="none"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></svg>';
+const ME='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>';
+const KEY='luyennoi-v1';
+let ST={prof:{name:'乔',lv:1},az:{key:'',region:'southeastasia',ok:false},hist:[],weak:{},done:{},rate:1};
+try{ const s=JSON.parse(localStorage.getItem(KEY)||'null'); if(s) ST=Object.assign(ST,s); }catch(e){}
+function save(){ try{ localStorage.setItem(KEY,JSON.stringify(ST)); }catch(e){} }
+let tt; function toast(m,ms){ const el=$('#toast'); el.textContent=m; el.hidden=false; clearTimeout(tt); tt=setTimeout(()=>el.hidden=true,ms||2800); }
+const scCls=v=>v==null?'':v>=80?'hi':v>=60?'mid':'lo';
+const HZ=/[\u3400-\u9fff]/;
+const chars=s=>[...(s||'')].filter(c=>HZ.test(c));
+
+/* ---------- Dữ liệu ---------- */
+let HSK=null, DLG=null, AUKEY={};
+async function loadData(){
+  const [h,d]=await Promise.all([fetch('data/hsk.json').then(r=>r.json()),fetch('data/dlg.json').then(r=>r.json()).catch(()=>[])]);
+  HSK=h; DLG=d;
+  for(const L of HSK) for(const les of L.lessons) for(const it of les.items){ AUKEY[it.hz]=les.au; if(it.ex) AUKEY[it.ex]=les.au; }
+  for(const s of DLG) for(const t of s.turns){ AUKEY[t.a.zh]='dlg'; for(const u of t.u) AUKEY[u.zh]='dlg'; }
+}
+
+/* ---------- Âm thanh: giọng mẫu ---------- */
+let actx=null; const ctx=()=>{ if(!actx) actx=new (window.AudioContext||window.webkitAudioContext)(); if(actx.state==='suspended') actx.resume().catch(()=>{}); return actx; };
+const AUD={}, AUDP={}, BUF=new Map();
+function audFile(k){ if(AUD[k]) return Promise.resolve(AUD[k]); if(!AUDP[k]) AUDP[k]=fetch('audio/'+k+'.json').then(r=>{ if(!r.ok) throw 0; return r.json(); }).then(j=>(AUD[k]=j)).catch(e=>{ delete AUDP[k]; throw e; }); return AUDP[k]; }
+async function refBuffer(text){
+  if(BUF.has(text)) return BUF.get(text);
+  const k=AUKEY[text]; if(!k) return null; const j=await audFile(k); const b64=j[text]; if(!b64) return null;
+  const bin=atob(b64), u=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++) u[i]=bin.charCodeAt(i);
+  const buf=await ctx().decodeAudioData(u.buffer); BUF.set(text,buf); return buf;
+}
+let playing=null;
+function stopPlay(){ try{ if(playing) playing.stop(); }catch(e){} playing=null; }
+async function playBuf(buf,rate){ stopPlay(); const c=ctx(), s=c.createBufferSource(); s.buffer=buf; s.playbackRate.value=rate||1; s.connect(c.destination); s.start(); playing=s; return new Promise(r=>s.onended=r); }
+async function playRef(text){
+  try{ const b=await refBuffer(text); if(b) return playBuf(b,ST.rate); }catch(e){}
+  if('speechSynthesis' in window){ const v=speechSynthesis.getVoices().find(x=>/^zh/i.test(x.lang)); if(v){ const u=new SpeechSynthesisUtterance(text); u.lang='zh-CN'; u.voice=v; u.rate=.85; speechSynthesis.speak(u); return; } }
+  toast('Câu này chưa có giọng mẫu.');
+}
+async function to16k(buf){ // AudioBuffer → Float32 16 kHz mono
+  const n=Math.ceil(buf.duration*16000), oc=new OfflineAudioContext(1,n,16000), s=oc.createBufferSource(); s.buffer=buf; s.connect(oc.destination); s.start(); const r=await oc.startRendering(); return r.getChannelData(0);
+}
+
+/* ---------- Ghi âm ---------- */
+const REC={stream:null,src:null,node:null,chunks:[],on:false,t0:0,lvl:0};
+async function micOpen(){
+  if(REC.stream&&REC.stream.active) return true;
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){ toast('Trình duyệt này không cho dùng micro. Hãy mở bằng Chrome (Android) hoặc Safari (iPhone).',5000); return false; }
+  try{ REC.stream=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:true,autoGainControl:true}}); return true; }
+  catch(e){ toast('Chưa được phép dùng micro. Bấm biểu tượng ổ khóa cạnh địa chỉ trang → cho phép Micro, rồi thử lại.',6000); return false; }
+}
+function micClose(){ try{ if(REC.stream) REC.stream.getTracks().forEach(t=>t.stop()); }catch(e){} REC.stream=null; }
+async function recStart(){
+  if(!(await micOpen())) return false; const c=ctx(); stopPlay();
+  REC.src=c.createMediaStreamSource(REC.stream); REC.node=c.createScriptProcessor(4096,1,1); REC.chunks=[]; REC.on=true; REC.t0=performance.now();
+  REC.node.onaudioprocess=e=>{ if(!REC.on) return; const d=e.inputBuffer.getChannelData(0); REC.chunks.push(new Float32Array(d)); let s=0; for(let i=0;i<d.length;i+=8) s+=d[i]*d[i]; REC.lvl=Math.min(1,Math.sqrt(s/(d.length/8))*6); const b=$('#micb'); if(b) b.style.setProperty('--lv',REC.lvl.toFixed(2)); };
+  REC.src.connect(REC.node); REC.node.connect(c.destination); return true;
+}
+async function recStop(){
+  REC.on=false; try{ REC.src.disconnect(); REC.node.disconnect(); }catch(e){}
+  const c=ctx(), n=REC.chunks.reduce((a,b)=>a+b.length,0); if(!n) return null;
+  const buf=c.createBuffer(1,n,c.sampleRate); let o=0; for(const ch of REC.chunks){ buf.copyToChannel(ch,0,o); o+=ch.length; }
+  let x=await to16k(buf);
+  // cắt lặng hai đầu, chừa 0,25 s
+  let a=0,b=x.length-1; const thr=0.02; const win=320;
+  const rms=i=>{ let s=0; for(let k=i;k<Math.min(x.length,i+win);k++) s+=x[k]*x[k]; return Math.sqrt(s/win); };
+  while(a<x.length-win&&rms(a)<thr) a+=win; while(b>win&&rms(b-win)<thr) b-=win;
+  if(b-a<1600) return {x,buf,empty:true};
+  x=x.slice(Math.max(0,a-4000),Math.min(x.length,b+4000));
+  // chuẩn hóa mức
+  let pk=0; for(const v of x) pk=Math.max(pk,Math.abs(v)); if(pk>0&&pk<0.5){ const g=0.6/pk; for(let i=0;i<x.length;i++) x[i]*=g; }
+  const out=c.createBuffer(1,x.length,16000); out.copyToChannel(x,0); return {x,buf:out};
+}
+function toWav16(x){ const n=x.length, b=new ArrayBuffer(44+n*2), v=new DataView(b); const w=(o,s)=>{ for(let i=0;i<s.length;i++) v.setUint8(o+i,s.charCodeAt(i)); };
+  w(0,'RIFF'); v.setUint32(4,36+n*2,true); w(8,'WAVE'); w(12,'fmt '); v.setUint32(16,16,true); v.setUint16(20,1,true); v.setUint16(22,1,true); v.setUint32(24,16000,true); v.setUint32(28,32000,true); v.setUint16(32,2,true); v.setUint16(34,16,true); w(36,'data'); v.setUint32(40,n*2,true);
+  for(let i=0;i<n;i++){ const s=Math.max(-1,Math.min(1,x[i])); v.setInt16(44+i*2,s<0?s*0x8000:s*0x7fff,true); } return b; }
+
+/* ---------- Azure Pronunciation Assessment ---------- */
+const azReady=()=>!!(ST.az.key&&ST.az.region&&window.SpeechSDK);
+function azAssess(x,ref){
+  return new Promise((resolve,reject)=>{
+    const S=window.SpeechSDK; if(!S) return reject(new Error('SDK chưa tải xong'));
+    const cfg=S.SpeechConfig.fromSubscription(ST.az.key.trim(),ST.az.region); cfg.speechRecognitionLanguage='zh-CN'; cfg.outputFormat=S.OutputFormat.Detailed;
+    const fmt=S.AudioStreamFormat.getWaveFormatPCM(16000,16,1), push=S.AudioInputStream.createPushStream(fmt);
+    push.write(toWav16(x).slice(44)); push.close();
+    const rec=new S.SpeechRecognizer(cfg,S.AudioConfig.fromStreamInput(push));
+    const pa=new S.PronunciationAssessmentConfig(ref||'',S.PronunciationAssessmentGradingSystem.HundredMark,S.PronunciationAssessmentGranularity.Phoneme,!!ref);
+    try{ pa.nbestPhonemeCount=5; }catch(e){}
+    pa.applyTo(rec);
+    const to=setTimeout(()=>{ try{ rec.close(); }catch(e){} reject(new Error('timeout')); },25000);
+    rec.recognizeOnceAsync(r=>{ clearTimeout(to); try{ rec.close(); }catch(e){}
+      if(r.reason===S.ResultReason.Canceled){ const cd=S.CancellationDetails.fromResult(r); return reject(new Error(cd.errorDetails||'canceled')); }
+      if(r.reason===S.ResultReason.NoMatch) return resolve({nomatch:true});
+      let j=null; try{ j=JSON.parse(r.properties.getProperty(S.PropertyId.SpeechServiceResponse_JsonResult)); }catch(e){}
+      resolve(j||{}); }, e=>{ clearTimeout(to); try{ rec.close(); }catch(_){} reject(new Error(String(e))); });
+  });
+}
+// Đổi kết quả Azure thành từng chữ: {hz, acc, err, t0, t1, ph:[{p,acc,nb}]}
+function azPerChar(j,target){
+  const nb=j&&j.NBest&&j.NBest[0]; if(!nb) return null;
+  const pa=nb.PronunciationAssessment||{}, out=[];
+  for(const w of nb.Words||[]){
+    const wp=w.PronunciationAssessment||{}, cs=chars(w.Word), syl=w.Syllables||[], phs=w.Phonemes||[];
+    const T=o=>o.Offset/1e7, D=o=>o.Duration/1e7;
+    cs.forEach((hz,k)=>{
+      const s=syl[k]; let t0,t1;
+      if(s&&s.Offset!=null){ t0=T(s); t1=t0+D(s); } else if(w.Offset!=null){ const a=T(w), d=D(w)/Math.max(1,cs.length); t0=a+k*d; t1=t0+d; }
+      const ph=phs.filter(p=>p.Offset!=null&&t0!=null?(T(p)>=t0-0.01&&T(p)<t1-0.005):false).map(p=>({p:p.Phoneme,acc:(p.PronunciationAssessment||{}).AccuracyScore,nb:((p.PronunciationAssessment||{}).NBestPhonemes||[]).map(x=>({p:x.Phoneme,s:x.Score}))}));
+      out.push({hz,acc:s&&s.PronunciationAssessment?s.PronunciationAssessment.AccuracyScore:wp.AccuracyScore,err:wp.ErrorType||'None',t0,t1,ph,sy:s&&s.Syllable});
+    });
+  }
+  // gióng theo câu đích (miscue có thể chèn/bỏ chữ)
+  const tg=chars(target), res=[]; let i=0;
+  for(const c of tg){
+    let k=i; while(k<out.length&&out[k].hz!==c&&out[k].err==='Insertion') k++;
+    if(k<out.length&&(out[k].hz===c||out[k].err==='Omission'||out[k].err==='Mispronunciation'||out[k].err==='None')){ res.push(Object.assign({},out[k],{hz:c})); i=k+1; }
+    else res.push({hz:c,acc:0,err:'Omission',ph:[]});
+  }
+  return {chars:res,acc:pa.AccuracyScore,flu:pa.FluencyScore,comp:pa.CompletenessScore,pron:pa.PronScore,text:nb.Display||j.DisplayText||''};
+}
+
+/* ---------- Mẹo sửa cho người Việt ---------- */
+const INI=['zh','ch','sh','b','p','m','f','d','t','n','l','g','k','h','j','q','x','r','z','c','s','y','w'];
+const split=b=>{ for(const i of INI) if(b.startsWith(i)) return [i,b.slice(i.length)]; return ['',b]; };
+const TIPI={zh:'zh: cong đầu lưỡi lên chạm vòm miệng phía sau lợi (uốn lưỡi), không bật hơi — khác "tr" tiếng Việt ở chỗ lưỡi cong nhiều hơn.',
+ ch:'ch: uốn lưỡi như zh nhưng BẬT HƠI mạnh (để tay trước miệng thấy luồng hơi).',
+ sh:'sh: uốn lưỡi, để hơi xì qua khe — như "s" miền Bắc nhưng lưỡi cong lên.',
+ r:'r: uốn lưỡi như sh nhưng rung dây thanh, gần "r" nhẹ; không đọc thành "z" hay "l".',
+ z:'z: đầu lưỡi chạm sau răng trên, đọc như "ch" tiếng Việt nhưng lưỡi phẳng ra trước, không bật hơi (ts).',
+ c:'c: như z nhưng bật hơi mạnh (ts‘). Không đọc thành "x" hay "k".',
+ s:'s: đầu lưỡi sau răng, lưỡi phẳng, như "x" tiếng Việt.',
+ j:'j: mặt lưỡi chạm ngạc cứng, môi dẹt, không bật hơi — gần "ch" tiếng Việt nhưng lưỡi rộng hơn.',
+ q:'q: như j nhưng bật hơi mạnh. Không đọc như "k" hay "c".',
+ x:'x: mặt lưỡi gần ngạc cứng, môi dẹt, hơi xì nhẹ — mềm hơn "x" tiếng Việt.',
+ p:'p: bật hơi mạnh (p‘). Tiếng Việt không có âm này ở đầu từ — đừng đọc thành "b".',
+ t:'t: bật hơi mạnh như "th" tiếng Việt.',
+ k:'k: bật hơi mạnh như "kh" nhưng ngắn và gọn, không xát.',
+ b:'b: không bật hơi, không rung — gần "p" trong "pin" nhẹ; đừng đọc thành "b" Việt (có hơi ngậm).',
+ d:'d: không bật hơi, như "t" tiếng Việt (không phải "đ").',
+ g:'g: không bật hơi, như "c/k" tiếng Việt.',
+ h:'h: xát ở cuống họng, mạnh hơn "h" tiếng Việt, gần "kh".',
+ f:'f: răng trên chạm môi dưới như "ph".', n:'n: đầu lưỡi chạm lợi trên.', l:'l: đầu lưỡi chạm lợi, đừng lẫn với n.', m:'m: như "m".'};
+const TIPF=f=>/ü|^u$/.test(f)?'ü: tròn môi như nói "u" nhưng lưỡi giữ vị trí "i".':/ng$/.test(f)?'-ng: kết thúc ở cuống lưỡi (như "ng" tiếng Việt), miệng mở, không khép môi.':/n$/.test(f)?'-n: kết thúc đầu lưỡi chạm lợi trên, đừng đọc thành -ng.':
+ /^e$/.test(f)?'e: miệng hé, lưỡi lùi sau, gần "ơ" chuyển sang "ưa" — không đọc thành "e" Việt.':/^er$/.test(f)?'er: "ơ" rồi cong lưỡi lên.':/^i$/.test(f)?'i sau z/c/s/zh/ch/sh/r là âm "ư" ngắn, không phải "i".':/ian/.test(f)?'ian đọc gần "iên".':/ui/.test(f)?'ui đọc như "uây".':/iu/.test(f)?'iu đọc như "iêu".':/un/.test(f)?'un sau j/q/x/y là "uyn"; sau âm khác là "uân".':'';
+const TIPT={1:'Thanh 1: giữ giọng CAO và BẰNG như đang hát một nốt dài; đừng để rơi xuống cuối.',2:'Thanh 2: đi từ giữa lên cao, như hỏi lại "hả?" hoặc dấu sắc kéo dài.',
+ 3:'Thanh 3: hạ giọng xuống thấp (gần dấu nặng nhưng kéo dài); đứng cuối câu thì hơi vòng lên.',4:'Thanh 4: rơi mạnh từ cao xuống thấp, dứt khoát như ra lệnh.',5:'Thanh nhẹ: đọc ngắn, nhẹ, không nhấn.'};
+function tipsFor(item,tg){ // tg = {b,t:[...]}
+  const out=[]; if(!tg) return out; const [ini,fin]=split(tg.b);
+  const lowPh=(item.ph||[]).filter(p=>p.acc!=null&&p.acc<60);
+  const phTxt=lowPh.map(p=>String(p.p||'').toLowerCase());
+  const iniBad=ini&&phTxt.some(p=>p.replace(/[\s\d]/g,'')===ini), finBad=phTxt.some(p=>p.replace(/[\s\d]/g,'')===fin||(/\d/.test(p)&&p.replace(/[\s\d]/g,'')===fin));
+  if(iniBad&&TIPI[ini]) out.push(TIPI[ini]);
+  if(finBad&&TIPF(fin)) out.push(TIPF(fin));
+  if(item.toneWrong&&tg.t[0]!==5) out.push(TIPT[tg.t[tg.t.length-1]]);
+  if(!out.length&&item.acc!=null&&item.acc<60){ if(TIPI[ini]) out.push(TIPI[ini]); else if(TIPF(fin)) out.push(TIPF(fin)); if(tg.t[0]!==5) out.push(TIPT[tg.t[tg.t.length-1]]); }
+  return out.slice(0,3);
+}
+
+/* ---------- So đường thanh điệu với giọng mẫu ---------- */
+function toneCompare(userX,refX,tones,times){
+  const ex=tones.map(t=>t.t[t.t.length-1]);
+  const u=HZPitch.analyze(userX,ex,{times}), r=refX?HZPitch.analyze(refX,ex):null;
+  return {u,r,notes:[]}; // luật tự kết luận sai thanh báo nhầm ~26% trên giọng chuẩn → chỉ dùng để vẽ
+  if(!u.ok) return {u,r,notes:[]};
+  const slope=s=>s&&s.chao?s.chao[4]-s.chao[0]:null, dip=s=>s&&s.chao?Math.min(...s.chao.slice(1,4))-Math.min(s.chao[0],s.chao[4]):null;
+  const notes=u.syl.map((s,k)=>{ const t=ex[k]; if(t===5||!s.chao) return null; const sl=slope(s), rs=r&&r.ok?slope(r.syl[k]):null;
+    if(t===4&&sl>-0.6) return {k,msg:'thanh 4 chưa rơi xuống'}; if(t===2&&sl<0.4) return {k,msg:'thanh 2 chưa đi lên'};
+    if(t===1&&Math.abs(sl)>1.4) return {k,msg:sl>0?'thanh 1 đang bị lên giọng':'thanh 1 đang bị rơi giọng'};
+    if(t===3&&sl>1.2&&k<ex.length-1) return {k,msg:'thanh 3 giữa câu nên hạ thấp, không vòng lên'};
+    if(rs!=null&&Math.sign(rs)!==Math.sign(sl)&&Math.abs(rs-sl)>2) return {k,msg:'hướng giọng khác giọng mẫu'}; return null; }).filter(Boolean);
+  return {u,r,notes};
+}
+function drawPitch(cv,cmp,n){
+  const r=cv.getBoundingClientRect(), dpr=window.devicePixelRatio||1; cv.width=r.width*dpr; cv.height=r.height*dpr; const g=cv.getContext('2d'); g.scale(dpr,dpr);
+  const W=r.width,H=r.height,pad=8,slot=(W-pad*2)/n, cs=getComputedStyle(document.documentElement);
+  g.strokeStyle=cs.getPropertyValue('--line'); g.lineWidth=1; for(let k=1;k<n;k++){ g.beginPath(); g.moveTo(pad+k*slot,6); g.lineTo(pad+k*slot,H-6); g.stroke(); }
+  const plot=(an,color,dash,w)=>{ if(!an||!an.ok) return; const fr=an.frames; g.strokeStyle=color; g.lineWidth=w; g.setLineDash(dash); g.lineJoin='round'; g.lineCap='round';
+    an.syl.forEach((s,k)=>{ const sg=s.seg||an.segs[k]; if(!sg) return; const [a,b]=sg; const pts=[]; for(let i=a;i<=b;i++) if(fr[i]&&fr[i].f) pts.push([i,12*Math.log2(fr[i].f/an.base)]);
+      if(pts.length<2) return; g.beginPath(); pts.forEach(([i,v],m)=>{ const x=pad+k*slot+slot*0.08+(i-a)/Math.max(1,b-a)*slot*0.84, y=H/2-v*(H/2-12)/7; m?g.lineTo(x,Math.max(4,Math.min(H-4,y))):g.moveTo(x,Math.max(4,Math.min(H-4,y))); }); g.stroke(); });
+    g.setLineDash([]); };
+  plot(cmp.r,cs.getPropertyValue('--ref'),[5,4],2.5); plot(cmp.u,cs.getPropertyValue('--seal'),[],3);
+}
+
+/* ---------- Thẻ luyện (dùng chung) ---------- */
+let CUR=null; // {target:{zh,py,vi,t}, el, onDone, last}
+function micUI(show){ const m=$('#mic'); m.hidden=!show; document.body.classList.toggle('has-mic',show); }
+function micLabel(t){ const l=$('#micl'); if(l) l.textContent=t; }
+function practiceHTML(tg,opt={}){
+  const cs=chars(tg.zh), size=cs.length<=2?'big':cs.length>8?'sm':'';
+  return `<div class="target"><div class="cells ${size}" id="cells">${cs.map((c,k)=>`<button class="cell" data-k="${k}"><span class="g">${esc(c)}</span><span class="s"></span></button>`).join('')}</div>
+    <div class="tpy">${esc(tg.py)}</div><div class="tvi">${esc(tg.vi)}</div>
+    <div class="acts"><button class="btn sm" id="pref">${SPK} Nghe mẫu</button><button class="btn sm" id="pslow">Nghe chậm</button><button class="btn sm" id="pme" hidden>${ME} Nghe lại tôi</button></div></div>
+    <div id="pres"></div>`;
+}
+function bindPractice(root,tg,onDone){
+  CUR={tg,root,onDone,last:null,sel:null};
+  root.querySelector('#pref').onclick=()=>playRef(tg.zh);
+  root.querySelector('#pslow').onclick=async()=>{ const b=await refBuffer(tg.zh).catch(()=>null); if(b) playBuf(b,0.75); else playRef(tg.zh); };
+  root.querySelector('#pme').onclick=()=>{ if(CUR.last&&CUR.last.buf) playBuf(CUR.last.buf,1); };
+  root.querySelector('#cells').onclick=e=>{ const c=e.target.closest('.cell'); if(!c||!CUR.last) return; const k=+c.dataset.k; CUR.sel=CUR.sel===k?null:k; renderDetail(); };
+  micUI(true); micLabel(azReady()?'Giữ nút đỏ để nói, thả ra để chấm':'Giữ nút đỏ để nói, thả ra để chấm (chưa có key Azure: chỉ so đường thanh điệu)');
+}
+async function assess(rec){
+  const tg=CUR.tg, res=CUR.root.querySelector('#pres'), refX=await refBuffer(tg.zh).then(b=>b?to16k(b):null).catch(()=>null);
+  res.innerHTML=`<div class="res"><div class="muted small"><span class="spin"></span> Đang chấm…</div></div>`;
+  let az=null, err=null;
+  if(azReady()){ try{ const j=await azAssess(rec.x,tg.zh); az=j.nomatch?{nomatch:true}:azPerChar(j,tg.zh); }catch(e){ err=e.message||String(e); } }
+  const times=az&&az.chars&&az.chars.every(c=>c.t0!=null)?az.chars.map(c=>[c.t0,c.t1]):null;
+  const cmp=toneCompare(rec.x,refX,tg.t,times);
+  const per=chars(tg.zh).map((hz,k)=>{ const a=az&&az.chars?az.chars[k]:null, note=cmp.notes.find(n=>n.k===k);
+    const it={hz,acc:a?a.acc:null,err:a?a.err:null,ph:a?a.ph:[],toneWrong:!!note,toneNote:note&&note.msg};
+    return it; });
+  const overall=az&&az.pron!=null?Math.round(az.pron):null;
+  CUR.last={rec,az,cmp,per,overall,err,buf:rec.buf};
+  renderResult();
+  logAttempt(tg,CUR.last);
+  if(CUR.onDone) CUR.onDone(CUR.last);
+}
+function renderResult(){
+  const L=CUR.last, tg=CUR.tg, res=CUR.root.querySelector('#pres');
+  CUR.root.querySelector('#pme').hidden=false;
+  CUR.root.querySelectorAll('.cell').forEach((c,k)=>{ const p=L.per[k]; c.classList.remove('ok','mid','bad','miss');
+    const v=p.err==='Omission'?null:p.acc; const cl=p.err==='Omission'?'miss':v==null?'':v>=80?'ok':v>=60?'mid':'bad'; if(cl) c.classList.add(cl);
+    const py=tg.t[k]; c.querySelector('.s').textContent=p.err==='Omission'?'thiếu':v==null?'':Math.round(v); c.setAttribute('aria-pressed',CUR.sel===k); });
+  if(L.rec.empty){ res.innerHTML='<div class="res"><div>Máy chưa nghe thấy tiếng. Giữ nút đỏ, nói to và rõ, rồi mới thả ra.</div></div>'; return; }
+  const az=L.az, bars=az&&!az.nomatch?[['Chính xác',az.acc],['Trôi chảy',az.flu],['Đầy đủ',az.comp]]:[];
+  const worst=L.per.map((p,k)=>({p,k})).filter(o=>o.p.acc!=null&&(o.p.acc<70||o.p.toneWrong)).sort((a,b)=>(a.p.acc||0)-(b.p.acc||0)).slice(0,2);
+  const tips=[]; worst.forEach(o=>tipsFor(o.p,tg.t[o.k]).forEach(t=>{ if(!tips.includes(t)) tips.push(`<b class="han">${esc(o.p.hz)}</b> — ${t}`); }));
+  res.innerHTML=`<div class="res">
+    <div class="score"><div class="ring" style="--v:${L.overall||0};--c:var(--${L.overall>=80?'jade':L.overall>=60?'warn':'bad'})">${L.overall==null?'—':L.overall}</div>
+      <div class="bars">${bars.map(([l,v])=>`<span>${l}</span><span class="bar"><i style="width:${v||0}%"></i></span><b>${v==null?'—':Math.round(v)}</b>`).join('')||`<span class="muted small" style="grid-column:1/-1">${L.err?'Azure lỗi: '+esc(L.err)+' — đang dùng chấm thanh điệu trên máy.':'Chưa có key Azure nên chưa chấm điểm. Xem đường giọng của anh so với giọng mẫu bên dưới; thêm key ở tab Cài đặt để chấm từng âm.'}</span>`}</div></div>
+    ${az&&az.text?`<div class="heard">Máy nghe được: <b>${esc(az.text)}</b></div>`:''}
+    ${az&&az.nomatch?'<div class="heard">Azure không nhận ra câu nào — nói to, rõ và sát micro hơn.</div>':''}
+    ${tips.length?`<div class="tips">${tips.map(t=>`<div>${t}</div>`).join('')}</div>`:L.overall>=85?'<div class="tips"><div>Tốt lắm! Thử đọc nhanh và liền mạch hơn như người bản ngữ.</div></div>':''}
+    ${L.cmp.notes.length?`<div class="note">Thanh điệu (đo trên máy, tham khảo): ${L.cmp.notes.map(n=>`<b class="han">${esc(L.per[n.k].hz)}</b> ${esc(n.msg)}`).join(' · ')}</div>`:''}
+    <div><div class="legend"><span><i style="background:var(--ref)"></i>Giọng mẫu</span><span><i style="background:var(--seal)"></i>Giọng anh</span><span>Đường giọng: lên/xuống phải cùng hướng với mẫu</span></div>
+      <div class="fig"><canvas id="pcv"></canvas></div></div>
+    <div id="pdet"></div>
+    <div class="acts"><button class="btn sm" id="pagain">↻ Đọc lại</button></div></div>`;
+  const cv=res.querySelector('#pcv'); requestAnimationFrame(()=>drawPitch(cv,L.cmp,L.per.length));
+  res.querySelector('#pagain').onclick=()=>{ res.innerHTML=''; CUR.root.querySelectorAll('.cell').forEach(c=>{ c.className='cell'; c.querySelector('.s').textContent=''; }); toast('Giữ nút đỏ và đọc lại.'); };
+  renderDetail();
+}
+function renderDetail(){
+  const d=CUR.root.querySelector('#pdet'); if(!d) return; CUR.root.querySelectorAll('.cell').forEach((c,k)=>c.setAttribute('aria-pressed',CUR.sel===k));
+  if(CUR.sel==null){ d.innerHTML=''; return; }
+  const k=CUR.sel, p=CUR.last.per[k], t=CUR.tg.t[k], tips=tipsFor(Object.assign({},p,{acc:p.acc==null?50:p.acc}),t);
+  d.innerHTML=`<div class="detail"><div><b class="han" style="font-size:1.4rem">${esc(p.hz)}</b> · ${esc(t.b)} thanh ${t.t.join(' hoặc ')} · ${p.err==='Omission'?'<b class="lo">bỏ sót</b>':p.acc==null?'':'điểm <b class="'+scCls(p.acc)+'">'+Math.round(p.acc)+'</b>'}${p.toneNote?' · '+esc(p.toneNote):''}</div>
+    ${p.ph&&p.ph.length?`<div class="ph">${p.ph.map(x=>`<span>${esc(x.p)} <b class="${scCls(x.acc)}">${x.acc==null?'':Math.round(x.acc)}</b>${x.nb&&x.nb[0]&&x.nb[0].p!==x.p&&x.acc<60?' → nghe giống '+esc(x.nb[0].p):''}</span>`).join('')}</div>`:''}
+    ${tips.map(x=>`<div>${x}</div>`).join('')}
+    <div class="acts" style="justify-content:flex-start"><button class="btn sm" id="pone">${SPK} Nghe mẫu chữ này</button></div></div>`;
+  d.querySelector('#pone').onclick=()=>playRef(p.hz);
+}
+function logAttempt(tg,L){
+  if(L.rec.empty||L.overall==null) return;
+  ST.hist.push({t:Date.now(),zh:tg.zh,s:L.overall,a:L.az&&L.az.acc!=null?Math.round(L.az.acc):null,az:!!(L.az&&!L.az.nomatch)});
+  if(ST.hist.length>2000) ST.hist=ST.hist.slice(-2000);
+  L.per.forEach((p,k)=>{ const t=tg.t[k]; if(!t) return; const bad=(p.acc!=null&&p.acc<60)||p.toneWrong; const key=t.b+t.t[t.t.length-1];
+    const w=ST.weak[key]||(ST.weak[key]={n:0,bad:0,hz:p.hz}); w.n++; if(bad) w.bad++; });
+  ST.done[tg.zh]=Math.max(ST.done[tg.zh]||0,L.overall); save();
+}
+// nút micro: giữ để nói (hoặc chạm 1 lần để bắt đầu, chạm lần nữa để dừng)
+{ const b=$('#micb'); let down=0, toggle=false, busy=false;
+  const start=async()=>{ if(busy||REC.on) return; const ok=await recStart(); if(!ok) return; b.classList.add('on'); micLabel('Đang nghe… thả ra để chấm'); };
+  const stop=async()=>{ if(!REC.on) return; b.classList.remove('on'); busy=true; b.disabled=true; micLabel('Đang xử lý…');
+    const rec=await recStop(); b.disabled=false; busy=false; micLabel('Giữ nút đỏ để nói, thả ra để chấm');
+    if(rec&&CUR) assess(rec); };
+  b.addEventListener('pointerdown',e=>{ e.preventDefault(); if(!CUR) return; if(toggle&&REC.on){ toggle=false; stop(); return; } down=performance.now(); start(); });
+  b.addEventListener('pointerup',()=>{ if(!REC.on&&!down) return; if(performance.now()-down<350&&!toggle){ toggle=true; micLabel('Đang nghe… chạm lần nữa để chấm'); down=0; return; } down=0; if(!toggle) stop(); });
+  b.addEventListener('pointercancel',()=>{ if(!toggle) stop(); });
+  b.addEventListener('contextmenu',e=>e.preventDefault());
+  document.addEventListener('keydown',e=>{ if(e.code==='Space'&&CUR&&!e.target.matches('input,select,textarea')){ e.preventDefault(); if(!REC.on) start(); } });
+  document.addEventListener('keyup',e=>{ if(e.code==='Space'&&CUR&&REC.on){ e.preventDefault(); stop(); } });
+  setInterval(()=>{ if(REC.on&&performance.now()-REC.t0>15000){ toggle=false; stop(); } },500);
+}
+
+/* ---------- Màn hình ---------- */
+let view=['hoi-thoai','luyen','tien-bo','cai-dat'].includes(location.hash.slice(1))?location.hash.slice(1):'hoi-thoai', SUB=null;
+function go(v,sub){ view=v; SUB=sub||null; CUR=null; micUI(false); stopPlay(); try{ history.replaceState(null,'','#'+v); }catch(e){} render(); window.scrollTo(0,0); }
+document.querySelectorAll('nav.tabs button').forEach(b=>b.onclick=()=>go(b.dataset.v));
+function render(){
+  document.querySelectorAll('nav.tabs button').forEach(b=>b.setAttribute('aria-selected',b.dataset.v===view));
+  const azb=$('#azb'); azb.textContent=ST.az.ok?'Chấm Azure':'Chấm cơ bản'; azb.classList.toggle('on',!!ST.az.ok);
+  if(!HSK){ V.innerHTML='<p class="muted"><span class="spin"></span> Đang tải dữ liệu…</p>'; return; }
+  if(view==='hoi-thoai') return SUB?renderChat():renderScenarios();
+  if(view==='luyen') return SUB&&SUB.item!=null?renderDrill():SUB&&SUB.lesson?renderLesson():renderLessons();
+  if(view==='tien-bo') return renderProgress();
+  return renderSettings();
+}
+/* Hội thoại */
+const KIND={s:'Đơn giản',n:'Tự nhiên',p:'Phong cách của anh'};
+function renderScenarios(){
+  V.innerHTML=`<h2>Hội thoại theo tình huống</h2><p class="muted small">Đối phương nói trước. Anh chọn một trong 3 câu trả lời (đơn giản, tự nhiên, hoặc theo phong cách của anh), giữ micro và nói. Máy chấm từng chữ rồi đi tiếp.</p>
+  ${ST.az.ok?'':'<div class="tip" style="margin:10px 0">Chưa có key Azure nên chưa chấm điểm, chỉ so đường thanh điệu. <a href="#cai-dat" id="gs">Thêm key miễn phí</a> để chấm từng âm như ELSA.</div>'}
+  <div class="scn">${DLG.map(s=>{ const best=s.turns.flatMap(t=>t.u.map(u=>ST.done[u.zh]||0)).filter(Boolean); return `<button data-s="${s.id}"><strong>${esc(s.title)}</strong><span>${esc(s.who)}</span>${best.length?`<em>Đã luyện ${best.length} câu · TB ${Math.round(best.reduce((a,b)=>a+b,0)/best.length)}</em>`:''}</button>`; }).join('')}</div>
+  ${DLG.length?'':'<p class="muted">Chưa có kịch bản.</p>'}`;
+  V.querySelectorAll('[data-s]').forEach(b=>b.onclick=()=>go('hoi-thoai',{s:DLG.find(s=>s.id===b.dataset.s),i:0,log:[],pick:null}));
+  const gs=$('#gs'); if(gs) gs.onclick=e=>{ e.preventDefault(); go('cai-dat'); };
+}
+function renderChat(){
+  const S=SUB, sc=S.s, T=sc.turns, i=S.i;
+  const hist=S.log.map(l=>`<div class="msg ai"><span class="who">${esc(sc.who.split(',')[0])}</span><div class="zh">${esc(l.a.zh)}</div><div class="vil">${esc(l.a.vi)}</div></div>
+     ${l.u?`<div class="msg me"><span class="who">Anh · ${KIND[l.u.k]||''} · ${l.s==null?'—':l.s} điểm</span><div class="zh">${esc(l.u.zh)}</div></div>`:''}`).join('');
+  const t=T[i], last=i===T.length-1;
+  if(!t){ return renderSummary(); }
+  V.innerHTML=`<div class="row" style="justify-content:space-between"><div><h2>${esc(sc.title)}</h2><div class="muted small">${esc(sc.who)} · lượt ${i+1}/${T.length}</div></div><button class="btn sm" id="back">← Tình huống khác</button></div>
+   ${sc.words.length?`<div class="note" style="margin:8px 0">Từ mới: ${sc.words.map(w=>`<b class="han">${esc(w.hz)}</b> ${esc(w.py)} – ${esc(w.vi)}`).join(' · ')}</div>`:''}
+   <div class="chat">${hist}
+    <div class="msg ai"><span class="who">${esc(sc.who.split(',')[0])}</span><div class="line"><button class="spk" id="ai">${SPK}</button><div><div class="zh">${esc(t.a.zh)}</div><div class="pyl">${esc(t.a.py)}</div><div class="vil">${esc(t.a.vi)}</div></div></div></div>
+    ${last?`<div class="acts"><button class="btn pri" id="fin">Kết thúc &amp; xem tổng kết</button></div>`:`
+    ${S.pick==null?`<h3>Anh trả lời thế nào?</h3><div class="opts">${t.u.map((u,k)=>`<button class="opt" data-k="${k}"><div style="flex:1"><div class="k">${KIND[u.k]||''}</div><div class="zh">${esc(u.zh)}</div><div class="pyl">${esc(u.py)}</div><div class="vil">${esc(u.vi)}</div><div class="why">${esc(u.why)}</div></div></button>`).join('')}</div>${t.tip?`<div class="tip" style="margin-top:8px">💡 ${esc(t.tip)}</div>`:''}`
+    :`<div class="card" id="prac">${practiceHTML(t.u[S.pick])}<div class="acts" style="margin-top:10px"><button class="btn sm" id="other">Chọn câu khác</button><button class="btn pri" id="next">Tiếp tục →</button></div></div>`}`}
+   </div>`;
+  $('#back').onclick=()=>go('hoi-thoai');
+  $('#ai').onclick=()=>playRef(t.a.zh);
+  if(!S.played){ S.played=true; playRef(t.a.zh); }
+  V.querySelectorAll('.opt').forEach(b=>b.onclick=()=>{ S.pick=+b.dataset.k; S.score=null; renderChat(); });
+  const fin=$('#fin'); if(fin) fin.onclick=()=>{ S.log.push({a:t.a}); S.i++; renderChat(); };
+  if(S.pick!=null){ const u=t.u[S.pick]; bindPractice($('#prac'),u,L=>{ S.score=L.overall; });
+    $('#other').onclick=()=>{ S.pick=null; CUR=null; micUI(false); renderChat(); };
+    $('#next').onclick=()=>{ S.log.push({a:t.a,u,s:S.score}); S.i++; S.pick=null; S.played=false; CUR=null; micUI(false); renderChat(); window.scrollTo(0,document.body.scrollHeight); };
+    $('#prac').scrollIntoView({block:'nearest'}); }
+}
+function renderSummary(){
+  const S=SUB, sc=S.s, said=S.log.filter(l=>l.u), sco=said.map(l=>l.s).filter(v=>v!=null), avg=sco.length?Math.round(sco.reduce((a,b)=>a+b,0)/sco.length):null;
+  micUI(false); CUR=null;
+  V.innerHTML=`<h2>Tổng kết: ${esc(sc.title)}</h2>
+   <div class="score card" style="margin:10px 0"><div class="ring" style="--v:${avg||0};--c:var(--${avg>=80?'jade':avg>=60?'warn':'bad'})">${avg==null?'—':avg}</div><div><b>${said.length} câu đã nói</b><div class="muted small">${avg==null?'':avg>=85?'Rất tốt — thử phương án "Phong cách của anh" ở lượt sau.':avg>=70?'Khá — luyện lại các câu dưới 70 điểm.':'Cần luyện thêm — dùng tab Luyện từ & câu cho các âm yếu.'}</div></div></div>
+   <div class="list">${said.map(l=>`<div class="item"><div><div class="z">${esc(l.u.zh)}</div><div class="p">${esc(l.u.py)}</div></div><span class="sc ${scCls(l.s)}">${l.s==null?'—':l.s}</span></div>`).join('')}</div>
+   <div class="acts" style="margin-top:14px"><button class="btn" id="again">Làm lại tình huống</button><button class="btn" id="copy">Chép tóm tắt gửi Claude</button><button class="btn pri" id="home">Tình huống khác</button></div>`;
+  $('#again').onclick=()=>go('hoi-thoai',{s:sc,i:0,log:[],pick:null});
+  $('#home').onclick=()=>go('hoi-thoai');
+  $('#copy').onclick=()=>copyText(`Tôi vừa luyện nói tiếng Trung tình huống "${sc.title}" (HSK ${ST.prof.lv}). Điểm từng câu:\n`+said.map(l=>`- ${l.u.zh} (${l.u.py}): ${l.s??'—'}`).join('\n')+`\nÂm hay sai: ${weakList(6).map(w=>w.key).join(', ')||'chưa đủ dữ liệu'}.\nHãy nhận xét và cho tôi bài luyện tiếp theo.`);
+}
+/* Luyện từ & câu */
+function renderLessons(){
+  const lv=ST.prof.lvView||1, L=HSK.find(x=>x.lv===lv);
+  V.innerHTML=`<h2>Luyện từ &amp; câu theo bài</h2><p class="muted small">Đọc từng từ và câu ví dụ của bài HSK, máy chấm từng chữ.</p>
+   <div class="row" style="margin:10px 0">${HSK.map(x=>`<button class="chip" data-lv="${x.lv}" aria-pressed="${x.lv===lv}">HSK ${x.lv}</button>`).join('')}</div>
+   <div class="list">${L.lessons.map(les=>{ const d=les.items.filter(it=>ST.done[it.hz]!=null||ST.done[it.ex]!=null).length; return `<button class="lesson" data-n="${les.n}"><span class="n">${les.k}</span><span><b>${esc(les.title)}</b><br><span class="muted small">${les.items.length} từ</span></span><span class="m">${d?d+'/'+les.items.length+' đã luyện':''}</span></button>`; }).join('')}</div>`;
+  V.querySelectorAll('[data-lv]').forEach(b=>b.onclick=()=>{ ST.prof.lvView=+b.dataset.lv; save(); render(); });
+  V.querySelectorAll('[data-n]').forEach(b=>b.onclick=()=>go('luyen',{lesson:L.lessons.find(x=>x.n===+b.dataset.n)}));
+}
+function renderLesson(){
+  const les=SUB.lesson, rows=[]; les.items.forEach((it,i)=>{ rows.push({i,kind:'w',zh:it.hz,py:it.py,vi:it.vi,t:it.tw}); if(it.ex) rows.push({i,kind:'e',zh:it.ex,py:it.exp,vi:it.exv,t:it.te}); });
+  SUB.rows=rows;
+  V.innerHTML=`<div class="row" style="justify-content:space-between"><h2>Bài ${les.k} · ${esc(les.title)}</h2><button class="btn sm" id="back">← Danh sách bài</button></div>
+   <div class="acts" style="justify-content:flex-start;margin:8px 0"><button class="btn pri" id="start">Luyện lần lượt từ đầu</button></div>
+   <div class="list">${rows.map((r,k)=>{ const s=ST.done[r.zh]; return `<button class="item" data-r="${k}"><div><div class="z">${esc(r.zh)}</div><div class="p">${esc(r.py)}</div><div class="v">${esc(r.vi)}</div></div><span class="sc ${scCls(s)}">${s==null?'':s}</span></button>`; }).join('')}</div>`;
+  $('#back').onclick=()=>go('luyen');
+  $('#start').onclick=()=>{ SUB.item=0; render(); };
+  V.querySelectorAll('[data-r]').forEach(b=>b.onclick=()=>{ SUB.item=+b.dataset.r; render(); });
+}
+function renderDrill(){
+  const r=SUB.rows[SUB.item], n=SUB.rows.length;
+  V.innerHTML=`<div class="row" style="justify-content:space-between"><div class="muted small">Bài ${SUB.lesson.k} · ${SUB.item+1}/${n} · ${r.kind==='w'?'Từ':'Câu ví dụ'}</div><button class="btn sm" id="back">← Bài học</button></div>
+   <div class="card" id="prac" style="margin-top:8px">${practiceHTML(r)}</div>
+   <div class="acts" style="margin-top:10px"><button class="btn" id="prev" ${SUB.item?'':'disabled'}>← Trước</button><button class="btn pri" id="next">${SUB.item<n-1?'Tiếp →':'Xong bài'}</button></div>`;
+  $('#back').onclick=()=>{ SUB.item=null; CUR=null; micUI(false); render(); };
+  $('#prev').onclick=()=>{ SUB.item--; render(); };
+  $('#next').onclick=()=>{ if(SUB.item<n-1){ SUB.item++; render(); } else { SUB.item=null; CUR=null; micUI(false); render(); toast('Đã xong bài!'); } };
+  bindPractice($('#prac'),r); playRef(r.zh);
+}
+/* Tiến bộ */
+function weakList(n){ return Object.entries(ST.weak).filter(([k,w])=>w.n>=2&&w.bad>0).map(([k,w])=>({key:k,rate:w.bad/w.n,...w})).sort((a,b)=>b.rate-a.rate||b.bad-a.bad).slice(0,n); }
+function renderProgress(){
+  const now=Date.now(), DAY=864e5, days=[...Array(14)].map((_,k)=>{ const d0=new Date(now-(13-k)*DAY); d0.setHours(0,0,0,0); const d1=+d0+DAY; const h=ST.hist.filter(x=>x.t>=+d0&&x.t<d1); return {d:d0,n:h.length,avg:h.length?Math.round(h.reduce((a,b)=>a+b.s,0)/h.length):null}; });
+  const mx=Math.max(1,...days.map(d=>d.n)), recent=ST.hist.slice(-50), avg=recent.length?Math.round(recent.reduce((a,b)=>a+b.s,0)/recent.length):null;
+  const wk=weakList(12);
+  V.innerHTML=`<h2>Tiến bộ</h2>
+   <div class="kpi" style="margin:10px 0"><div><b>${ST.hist.length}</b><span>lần nói</span></div><div><b class="${scCls(avg)}">${avg==null?'—':avg}</b><span>điểm TB 50 lần gần nhất</span></div><div><b>${Object.keys(ST.done).length}</b><span>câu/từ đã luyện</span></div></div>
+   <h3>14 ngày qua (số lần nói)</h3><div class="card"><div class="days">${days.map(d=>`<div style="height:${d.n/mx*100}%" title="${d.n} lần${d.avg!=null?', TB '+d.avg:''}"><span>${d.d.getDate()}</span></div>`).join('')}</div><div style="height:18px"></div></div>
+   <h3>Âm hay sai nhất</h3>${wk.length?`<div class="weak">${wk.map(w=>`<span><b class="han">${esc(w.hz)}</b> ${esc(w.key)} · sai ${w.bad}/${w.n}</span>`).join('')}</div><p class="note">Bấm luyện lại các từ chứa những âm này trong tab Luyện từ &amp; câu.</p>`:'<p class="muted small">Chưa đủ dữ liệu.</p>'}
+   <div class="acts" style="justify-content:flex-start;margin-top:14px"><button class="btn" id="copy">Chép tóm tắt gửi Claude</button></div>`;
+  $('#copy').onclick=()=>copyText(`Tiến bộ luyện nói tiếng Trung của tôi: ${ST.hist.length} lần nói, điểm trung bình gần đây ${avg??'—'}/100.\nÂm hay sai: ${wk.map(w=>`${w.hz} ${w.key} (sai ${w.bad}/${w.n})`).join(', ')||'chưa có'}.\nHãy giải thích vì sao người Việt hay sai những âm này và cho tôi bài luyện 10 phút.`);
+}
+function copyText(t){ (navigator.clipboard?navigator.clipboard.writeText(t):Promise.reject()).then(()=>toast('Đã chép. Mở Claude và dán vào khung chat.'),()=>{ const a=document.createElement('textarea'); a.value=t; document.body.appendChild(a); a.select(); try{ document.execCommand('copy'); toast('Đã chép.'); }catch(e){ toast('Không chép được.'); } a.remove(); }); }
+/* Cài đặt */
+const REGIONS=['southeastasia','eastasia','japaneast','koreacentral','centralindia','australiaeast','westeurope','northeurope','eastus','eastus2','westus','westus2','centralus'];
+function renderSettings(){
+  V.innerHTML=`<h2>Cài đặt</h2>
+   <h3>Chấm phát âm bằng Azure (miễn phí 5 giờ/tháng)</h3>
+   <div class="card list">
+    <div class="field">Key (Key 1 của tài nguyên Speech)<input id="k" type="password" autocomplete="off" value="${esc(ST.az.key)}" placeholder="Dán key vào đây"></div>
+    <div class="field">Khu vực (Region)<select id="rg">${REGIONS.map(r=>`<option ${r===ST.az.region?'selected':''}>${r}</option>`).join('')}</select></div>
+    <div class="row"><button class="btn pri" id="test">Lưu &amp; kiểm tra</button><span id="tr" class="small muted">${ST.az.ok?'✓ Đã kết nối':''}</span></div>
+    <p class="note">Key chỉ lưu trên máy này, không gửi đi đâu ngoài máy chủ Azure của Microsoft. Lần kiểm tra dùng giọng mẫu “你好”, không cần nói.</p>
+    <details><summary><b>Cách lấy key miễn phí (5 phút)</b></summary><ol class="steps">
+     <li>Vào <b>portal.azure.com</b>, đăng ký tài khoản Microsoft Azure miễn phí (cần thẻ để xác minh; gói Free không trừ tiền).</li>
+     <li>Ô tìm kiếm trên cùng → gõ <b>Speech services</b> → <b>Create</b>.</li>
+     <li>Resource group: tạo mới (ví dụ <i>luyen-noi</i>). Region: <b>Southeast Asia</b>. Name: tên bất kỳ. <b>Pricing tier: Free F0</b>.</li>
+     <li>Create → đợi xong → <b>Go to resource</b> → mục <b>Keys and Endpoint</b> → chép <b>KEY 1</b> và <b>Location/Region</b>.</li>
+     <li>Dán key ở trên, chọn đúng Region, bấm <b>Lưu &amp; kiểm tra</b>.</li></ol>
+     <p class="note">Gói F0 tự dừng khi hết 5 giờ/tháng (không tính tiền). Mỗi câu khoảng 2–5 giây → vài nghìn lần chấm/tháng.</p></details>
+   </div>
+   <h3>Hồ sơ</h3>
+   <div class="card list">
+    <div class="field">Tên tiếng Trung<input id="nm" value="${esc(ST.prof.name)}"></div>
+    <div class="field">Tốc độ giọng mẫu<select id="rt">${[[0.8,'Chậm'],[0.9,'Hơi chậm'],[1,'Bình thường']].map(([v,l])=>`<option value="${v}" ${ST.rate==v?'selected':''}>${l}</option>`).join('')}</select></div>
+    <div class="row"><button class="btn" id="sv">Lưu</button><button class="btn" id="exp">Xuất tiến độ</button><label class="btn" style="cursor:pointer">Nhập tiến độ<input type="file" id="imp" accept=".json" hidden></label></div>
+    <p class="note">Tiến độ lưu trong trình duyệt của máy này. Dùng Xuất/Nhập để chuyển sang máy khác.</p>
+   </div>`;
+  $('#test').onclick=async()=>{ ST.az.key=$('#k').value.trim(); ST.az.region=$('#rg').value; ST.az.ok=false; save(); const tr=$('#tr');
+    if(!ST.az.key){ tr.textContent='Chưa nhập key.'; render(); return; }
+    if(!window.SpeechSDK){ tr.textContent='Thư viện Azure chưa tải xong, thử lại sau vài giây.'; return; }
+    tr.innerHTML='<span class="spin"></span> Đang kiểm tra…';
+    try{ const b=await refBuffer('你好'); const x=await to16k(b); const j=await azAssess(x,'你好'); const r=azPerChar(j,'你好');
+      if(!r) throw new Error('Không có kết quả'); ST.az.ok=true; save(); tr.textContent=`✓ Kết nối được. Giọng mẫu “你好” đạt ${Math.round(r.pron)} điểm.`; $('#azb').textContent='Chấm Azure'; $('#azb').classList.add('on'); }
+    catch(e){ tr.textContent='✗ Chưa được: '+(/401|403|Unauthorized|invalid subscription/i.test(e.message)?'key hoặc region chưa đúng.':e.message); } };
+  $('#sv').onclick=()=>{ ST.prof.name=$('#nm').value.trim()||'乔'; ST.rate=+$('#rt').value; save(); toast('Đã lưu.'); };
+  $('#exp').onclick=()=>{ const d={...ST,az:{region:ST.az.region}}; const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([JSON.stringify(d)],{type:'application/json'})); a.download='luyen-noi-tien-do.json'; a.click(); };
+  $('#imp').onchange=async e=>{ const f=e.target.files[0]; if(!f) return; try{ const d=JSON.parse(await f.text()); ST.hist=(d.hist||[]).concat(ST.hist).sort((a,b)=>a.t-b.t); ST.done=Object.assign({},d.done||{},ST.done); ST.weak=Object.assign({},d.weak||{},ST.weak); save(); toast('Đã nhập tiến độ.'); render(); }catch(err){ toast('File không hợp lệ.'); } };
+}
+window.addEventListener('hashchange',()=>{ const h=location.hash.slice(1); if(h&&h!==view&&['hoi-thoai','luyen','tien-bo','cai-dat'].includes(h)) go(h); });
+document.addEventListener('visibilitychange',()=>{ if(document.hidden&&!REC.on) micClose(); });
+render(); loadData().then(render).catch(()=>{ V.innerHTML='<p>Không tải được dữ liệu. Kiểm tra mạng rồi tải lại trang.</p>'; });
+if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});
+window.__LN={ST,azPerChar,toneCompare,assess:x=>assess(x),get CUR(){return CUR;}};
+}

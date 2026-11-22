@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#2b6955">
+<title>Luyện Nói HSK</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&family=Noto+Serif+SC:wght@500;700&display=swap">
+<style>
+/* VOICE: thầy luyện phát âm điềm tĩnh, rõ ràng. IDEA: tờ luyện chữ ô mễ + máy đo giọng. PICTURE: chữ Hán lớn từng ô, đường thanh điệu của anh chồng lên giọng mẫu.
+   COLOUR: giấy xám ngọc, mực đen, ngọc bích làm chủ, son đỏ cho micro và lỗi. TYPE: Be Vietnam Pro + Noto Serif SC. LAYOUT: một cột hẹp, micro dính đáy, tab dưới cùng như app điện thoại. */
+:root{--paper:#e9eeeb;--surface:#f8faf9;--sunk:#eef2f0;--ink:#17201c;--muted:#56655f;--line:#cbd6d0;--grid:#e2b8b1;
+ --jade:#2b6955;--jade-soft:#d3e5dd;--seal:#b0372b;--on-seal:#fff6f4;--warn:#9a6a12;--warn-soft:#f6ead2;--bad:#b0372b;--bad-soft:#f5dcd8;--ref:#8a9a93;
+ --f-han:"Noto Serif SC","Songti SC","SimSun",serif;--f-body:"Be Vietnam Pro",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+@media (prefers-color-scheme:dark){:root{--paper:#0f1412;--surface:#171f1c;--sunk:#131a17;--ink:#e3eae7;--muted:#93a39c;--line:#2a3631;--grid:#4b2c28;
+ --jade:#79bba3;--jade-soft:#1e3a30;--seal:#cf5547;--warn:#d9a54a;--warn-soft:#3a2f18;--bad:#e5786c;--bad-soft:#3b1f1b;--ref:#6d7d76;color-scheme:dark}}
+*{box-sizing:border-box;min-width:0}
+html,body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.55 var(--f-body);-webkit-tap-highlight-color:transparent}
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--jade);outline-offset:2px}
+.han{font-family:var(--f-han)}
+.app{max-width:720px;margin:0 auto;padding:max(14px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) calc(84px + env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left))}
+header{display:flex;align-items:center;gap:12px;margin-bottom:14px}
+.seal{width:42px;height:42px;flex:none;background:var(--seal);color:var(--on-seal);border-radius:6px;display:grid;place-items:center;font-family:var(--f-han);font-weight:700;font-size:24px;transform:rotate(-4deg)}
+header h1{margin:0;font-size:1.2rem;line-height:1.2}
+header p{margin:0;color:var(--muted);font-size:.82rem}
+.azb{margin-left:auto;font-size:.75rem;border-radius:99px;padding:3px 10px;border:1px solid var(--line);color:var(--muted);background:var(--surface);white-space:nowrap}
+.azb.on{color:var(--jade);border-color:var(--jade)}
+nav.tabs{position:fixed;left:0;right:0;bottom:0;z-index:20;display:grid;grid-template-columns:repeat(4,1fr);background:var(--surface);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom)}
+nav.tabs button{background:none;border:0;padding:9px 4px 8px;display:flex;flex-direction:column;align-items:center;gap:2px;font-size:.74rem;font-weight:600;color:var(--muted);min-height:56px}
+nav.tabs svg{width:22px;height:22px}
+nav.tabs button[aria-selected="true"]{color:var(--jade)}
+h2{font-size:1.15rem;margin:0 0 4px} h3{font-size:.74rem;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:18px 0 8px;font-weight:600}
+.muted{color:var(--muted)} .small{font-size:.85rem}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px}
+.list{display:flex;flex-direction:column;gap:8px}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.btn{border:1px solid var(--line);background:var(--surface);border-radius:10px;padding:10px 14px;font-weight:600;min-height:44px;display:inline-flex;align-items:center;justify-content:center;gap:8px}
+.btn.pri{background:var(--jade);border-color:var(--jade);color:var(--surface)}
+.btn.sm{min-height:36px;padding:6px 10px;font-size:.85rem}
+.btn svg{width:18px;height:18px;flex:none}.btn{white-space:nowrap}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.chip{border:1px solid var(--line);background:var(--surface);padding:6px 12px;border-radius:99px;font-size:.88rem;font-weight:500;min-height:36px}
+.chip[aria-pressed="true"]{background:var(--jade);border-color:var(--jade);color:var(--surface)}
+.scn{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,250px),1fr));gap:10px}
+.scn button{text-align:left;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:3px;min-height:76px}
+.scn strong{font-size:.98rem} .scn span{font-size:.82rem;color:var(--muted)}
+.scn em{font-style:normal;font-size:.75rem;font-weight:700;color:var(--jade)}
+.lesson{display:flex;align-items:center;gap:10px;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:10px 12px;text-align:left;width:100%}
+.lesson b{font-weight:600} .lesson .n{width:30px;height:30px;border-radius:50%;background:var(--sunk);display:grid;place-items:center;font-size:.8rem;font-weight:700;flex:none}
+.lesson .m{margin-left:auto;font-size:.78rem;color:var(--muted);white-space:nowrap}
+.item{display:flex;align-items:center;gap:10px;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:10px 12px;width:100%;text-align:left}
+.item .z{font-family:var(--f-han);font-size:1.3rem} .item .p{color:var(--jade);font-size:.85rem} .item .v{color:var(--muted);font-size:.82rem}
+.item .sc{margin-left:auto;font-weight:700;font-variant-numeric:tabular-nums;font-size:.9rem}
+.hi{color:var(--jade)} .mid{color:var(--warn)} .lo{color:var(--bad)}
+/* Thẻ luyện */
+.target{display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center;padding:18px 10px 12px}
+.cells{display:flex;flex-wrap:wrap;justify-content:center;gap:6px}
+.cell{display:flex;flex-direction:column;align-items:center;gap:2px;border:0;background:none;padding:0}
+.cell .g{--s:3.2rem;width:var(--s);height:var(--s);display:grid;place-items:center;border:1.5px solid var(--grid);font-family:var(--f-han);font-size:calc(var(--s)*.7);line-height:1;border-radius:4px;
+ background:linear-gradient(var(--grid),var(--grid)) center/100% 1px no-repeat,linear-gradient(var(--grid),var(--grid)) center/1px 100% no-repeat}
+.cells.big .g{--s:4.6rem} .cells.sm .g{--s:2.4rem}
+.cell .py{font-size:.8rem;color:var(--jade);font-weight:500}
+.cell .s{font-size:.7rem;font-weight:700;font-variant-numeric:tabular-nums;min-height:1em}
+.cell.ok .g{border-color:var(--jade);background-color:color-mix(in srgb,var(--jade) 10%,transparent)}
+.cell.mid .g{border-color:var(--warn);background-color:var(--warn-soft)}
+.cell.bad .g{border-color:var(--bad);background-color:var(--bad-soft)}
+.cell.miss .g{border-style:dashed;opacity:.6}
+.cell[aria-pressed="true"] .g{outline:2px solid var(--ink);outline-offset:2px}
+.tpy{color:var(--jade);font-size:1rem} .tvi{color:var(--muted);font-size:.92rem}
+.acts{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+.spk{width:44px;height:44px;border-radius:50%;border:1px solid var(--line);background:var(--surface);color:var(--jade);display:grid;place-items:center;padding:0;flex:none}
+.spk svg{width:20px;height:20px}
+.res{display:flex;flex-direction:column;gap:12px;border-top:1px dashed var(--line);padding-top:14px;margin-top:6px}
+.score{display:flex;align-items:center;gap:14px}
+.ring{--v:0;width:74px;height:74px;border-radius:50%;flex:none;display:grid;place-items:center;font-weight:700;font-size:1.35rem;font-variant-numeric:tabular-nums;
+ background:radial-gradient(closest-side,var(--surface) 78%,transparent 80% 100%),conic-gradient(var(--c,var(--jade)) calc(var(--v)*1%),var(--line) 0)}
+.bars{display:grid;grid-template-columns:auto 1fr auto;gap:4px 8px;font-size:.8rem;align-items:center;flex:1}
+.bar{height:6px;border-radius:9px;background:var(--line);overflow:hidden} .bar i{display:block;height:100%;background:var(--jade)}
+.heard{font-size:.88rem;color:var(--muted)} .heard b{font-family:var(--f-han);color:var(--ink);font-weight:500}
+.detail{background:var(--sunk);border-radius:10px;padding:10px 12px;font-size:.9rem;display:flex;flex-direction:column;gap:6px}
+.ph{display:flex;flex-wrap:wrap;gap:6px} .ph span{border:1px solid var(--line);border-radius:8px;padding:2px 8px;font-size:.82rem;background:var(--surface)}
+.tips{display:flex;flex-direction:column;gap:6px;font-size:.9rem}
+.tips div{background:var(--sunk);border-radius:10px;padding:8px 10px}
+.fig{position:relative;height:150px;background:var(--sunk);border-radius:10px}
+.fig canvas{position:absolute;inset:0;width:100%;height:100%}
+.legend{display:flex;gap:14px;font-size:.76rem;color:var(--muted)} .legend i{display:inline-block;width:14px;height:3px;border-radius:2px;vertical-align:3px;margin-right:5px}
+/* micro */
+.mic{position:fixed;left:0;right:0;bottom:calc(56px + env(safe-area-inset-bottom));z-index:15;display:flex;flex-direction:column;align-items:center;gap:6px;padding:10px 16px 10px;
+ background:color-mix(in srgb,var(--paper) 92%,transparent);backdrop-filter:blur(8px);border-top:1px solid var(--line)}
+.mic[hidden]{display:none}
+.micb{width:76px;height:76px;border-radius:50%;border:0;background:var(--seal);color:var(--on-seal);display:grid;place-items:center;touch-action:none;user-select:none;-webkit-user-select:none}
+.micb svg{width:32px;height:32px}
+.micb.on{transform:scale(1.08);box-shadow:0 0 0 calc(var(--lv,0)*22px + 4px) color-mix(in srgb,var(--seal) 30%,transparent)}
+.micb:disabled{opacity:.45}
+.micl{font-size:.82rem;color:var(--muted);text-align:center;min-height:1.3em}
+.has-mic .app{padding-bottom:calc(200px + env(safe-area-inset-bottom))}
+/* hội thoại */
+.chat{display:flex;flex-direction:column;gap:10px}
+.msg{max-width:94%;border-radius:14px;padding:10px 12px;border:1px solid var(--line);background:var(--surface);display:flex;flex-direction:column;gap:4px}
+.msg.ai{align-self:flex-start;border-top-left-radius:4px}
+.msg.me{align-self:flex-end;background:var(--jade-soft);border-color:color-mix(in srgb,var(--jade) 35%,var(--line));border-top-right-radius:4px}
+.who{font-size:.7rem;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.zh{font-family:var(--f-han);font-size:1.3rem;line-height:1.45} .pyl{color:var(--jade);font-size:.88rem} .vil{color:var(--muted);font-size:.86rem}
+.line{display:flex;gap:10px;align-items:flex-start} .line>div{flex:1}
+.opts{display:flex;flex-direction:column;gap:8px}
+.opt{display:flex;gap:10px;align-items:flex-start;background:var(--surface);border:1.5px solid var(--line);border-radius:12px;padding:10px;text-align:left;width:100%}
+.opt[aria-pressed="true"]{border-color:var(--jade);background:var(--jade-soft)}
+.opt .k{font-size:.68rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--seal)}
+.opt .zh{font-size:1.15rem}
+.why{font-size:.82rem;color:var(--muted)}
+.tip{font-size:.86rem;background:var(--warn-soft);border-radius:10px;padding:8px 10px}
+.field{display:flex;flex-direction:column;gap:5px;font-size:.85rem;font-weight:600;color:var(--muted)}
+.field input,.field select{font-weight:400;font-size:16px;background:var(--sunk);border:1px solid var(--line);border-radius:8px;padding:10px;color:var(--ink);width:100%}
+ol.steps{padding-left:20px;margin:6px 0;font-size:.9rem} ol.steps li{margin:4px 0}
+.note{font-size:.84rem;color:var(--muted)}
+.toast{position:fixed;left:50%;bottom:calc(150px + env(safe-area-inset-bottom));transform:translateX(-50%);background:var(--ink);color:var(--paper);padding:10px 16px;border-radius:8px;font-size:.9rem;z-index:30;max-width:calc(100% - 32px);text-align:center}
+.toast[hidden]{display:none}
+.spin{display:inline-block;width:16px;height:16px;border:2px solid var(--line);border-top-color:var(--jade);border-radius:50%;animation:sp 0.8s linear infinite;vertical-align:-3px}
+@keyframes sp{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spin{animation:none}.micb.on{transform:none}}
+.days{display:flex;gap:4px;align-items:flex-end;height:90px}
+.days div{flex:1;background:var(--jade);border-radius:3px 3px 0 0;min-height:2px;position:relative}
+.days span{position:absolute;bottom:-18px;left:50%;transform:translateX(-50%);font-size:.65rem;color:var(--muted)}
+.kpi{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.kpi div{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:10px;text-align:center}
+.kpi b{display:block;font-size:1.4rem;font-variant-numeric:tabular-nums} .kpi span{font-size:.75rem;color:var(--muted)}
+.weak{display:flex;flex-wrap:wrap;gap:6px} .weak span{border:1px solid var(--line);background:var(--surface);border-radius:99px;padding:3px 10px;font-size:.85rem}
+</style>
+</head>
+<body>
+<div class="app">
+  <header><div class="seal" aria-hidden="true">说</div><div><h1>Luyện Nói HSK</h1><p>Nói – chấm từng âm – sửa ngay</p></div><span class="azb" id="azb">Chấm cơ bản</span></header>
+  <main id="view"></main>
+</div>
+<div class="mic" id="mic" hidden>
+  <button class="micb" id="micb" aria-label="Giữ để nói"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button>
+  <div class="micl" id="micl">Giữ nút để nói, thả ra để chấm</div>
+</div>
+<nav class="tabs" role="tablist">
+  <button role="tab" data-v="hoi-thoai"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16v10H9l-5 4z"/></svg>Hội thoại</button>
+  <button role="tab" data-v="luyen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M12 4v16M4 12h16"/></svg>Luyện từ & câu</button>
+  <button role="tab" data-v="tien-bo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>Tiến bộ</button>
+  <button role="tab" data-v="cai-dat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.6-2-3.4-2.4 1a7 7 0 0 0-2-1.2L14 3h-4l-.5 2.6a7 7 0 0 0-2 1.2l-2.4-1-2 3.4 2 1.6A7 7 0 0 0 5 12c0 .4 0 .8.1 1.2l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 2 1.2L10 21h4l.5-2.6a7 7 0 0 0 2-1.2l2.4 1 2-3.4-2-1.6c.1-.4.1-.8.1-1.2z"/></svg>Cài đặt</button>
+</nav>
+<div class="toast" id="toast" role="status" hidden></div>
+<script src="lib/speech-sdk.min.js" defer></script>
+<script src="pitch.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
