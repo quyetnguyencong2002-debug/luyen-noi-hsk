@@ -14,11 +14,11 @@ const HZ=/[\u3400-\u9fff]/;
 const chars=s=>[...(s||'')].filter(c=>HZ.test(c));
 
 /* ---------- Dữ liệu ---------- */
-let HSK=null, DLG=null, AUKEY={}, HZD={}, STK=null, STKP=null;
+let HSK=null, DLG=null, AUKEY={}, HZD={}, STK=null, STKP=null, GRAM={};
 function loadStrokes(){ if(STK) return Promise.resolve(STK); if(!STKP) STKP=fetch('data/strokes.json').then(r=>{ if(!r.ok) throw 0; return r.json(); }).then(j=>(STK=j)).catch(e=>{ STKP=null; throw e; }); return STKP; }
 async function loadData(){
-  const [h,d,hz,pth]=await Promise.all([fetch('data/hsk.json').then(r=>r.json()),fetch('data/dlg.json').then(r=>r.json()).catch(()=>[]),fetch('data/hanzi.json').then(r=>r.json()).catch(()=>({})),fetch('data/path.json').then(r=>r.json())]);
-  HSK=h; DLG=d; HZD=hz||{}; setupPath(pth);
+  const [h,d,hz,pth,gr]=await Promise.all([fetch('data/hsk.json').then(r=>r.json()),fetch('data/dlg.json').then(r=>r.json()).catch(()=>[]),fetch('data/hanzi.json').then(r=>r.json()).catch(()=>({})),fetch('data/path.json').then(r=>r.json()),fetch('data/grammar.json').then(r=>r.ok?r.json():{}).catch(()=>({}))]);
+  HSK=h; DLG=d; HZD=hz||{}; GRAM=gr||{}; setupPath(pth);
   for(const L of HSK) for(const les of L.lessons) for(const it of les.items){ AUKEY[it.hz]=les.au; if(it.ex) AUKEY[it.ex]=les.au; }
   for(const s of DLG) for(const t of s.turns){ AUKEY[t.a.zh]='dlg'; for(const u of t.u) AUKEY[u.zh]='dlg'; }
 }
@@ -299,7 +299,7 @@ function render(){
   const azb=$('#azb'); azb.textContent=ST.az.ok?'Chấm Azure':'Chấm cơ bản'; azb.classList.toggle('on',!!ST.az.ok);
   if(!HSK){ V.innerHTML='<p class="muted"><span class="spin"></span> Đang tải dữ liệu…</p>'; return; }
   if(view==='hoi-thoai') return SUB?renderChat():renderScenarios();
-  if(view==='luyen') return SUB&&SUB.ptest?renderPTest():SUB&&SUB.item!=null?renderDrill():SUB&&SUB.lesson?renderLesson():renderLessons();
+  if(view==='luyen') return SUB&&SUB.gram?renderGrammar():SUB&&SUB.ptest?renderPTest():SUB&&SUB.item!=null?renderDrill():SUB&&SUB.lesson?renderLesson():renderLessons();
   if(view==='on-tu') return renderSRS();
   if(view==='tien-bo') return renderProgress();
   return renderSettings();
@@ -407,6 +407,7 @@ function buildTest(id){
     qs=shuf2(lw).slice(0,40).map(w=>vq(w,all,'vocab'));
     const rs=PATH.filter(x=>x.lv===lv).flatMap(x=>(PREAD[x.n]||[]));
     qs=qs.concat(shuf2(rs).slice(0,10).map(rd));
+    qs=qs.concat(shuf2(PATH.filter(x=>x.lv===lv).flatMap(x=>(GRAM[x.n]&&GRAM[x.n].q)||[])).slice(0,8).map(gq));
   } else {
     const n=+id, L=PATH.find(x=>x.n===n); lv=L.lv; key=n; name=`HSK ${L.lv} · Bài ${L.k} · ${L.t}`;
     const cur=L.w.map(h=>pool[h]), prev=PATH.filter(x=>x.n<n).flatMap(x=>x.w).map(h=>pool[h]);
@@ -416,6 +417,7 @@ function buildTest(id){
     const weak=prev.map(w=>({w,s:(SR.c[w.hz]&&SR.c[w.hz].q==='review'?Math.min(5,SR.c[w.hz].iv)/5:0)+Math.random()*.6})).sort((a,b)=>a.s-b.s).slice(0,rv).map(x=>x.w);
     qs=qs.concat(shuf2(weak).map(w=>vq(w,all,'review')));
     qs=qs.concat((PREAD[n]||[]).map(rd));
+    qs=qs.concat(shuf2((GRAM[n]&&GRAM[n].q)||[]).slice(0,3).map(gq));
   }
   return {id,key,name,qs,i:0,ans:[],done:false,pass:false,score:0};
 }
@@ -426,10 +428,10 @@ function renderPTest(){
   if(T.done) return renderPResult();
   const q=T.qs[T.i];
   let prompt='';
-  if(q.sec!=='read'){ const w=q.w; prompt = q.type==='hz2vi'?`<div style="font-family:'Noto Serif SC',serif;font-size:4.5rem;line-height:1.1">${esc(w.hz)}</div>`:q.type==='vi2hz'?`<div style="font-size:1.6rem;font-weight:600">${esc(w.vi)}</div>`:`<div style="font-size:2rem;color:var(--jade);font-weight:600">${esc(w.py)}</div>`; }
-  else if(q.type==='F') prompt=`<div style="font-family:'Noto Serif SC',serif;font-size:1.3rem;line-height:1.8">${esc(q.text).replace('＿＿','<span style="display:inline-block;min-width:3em;border-bottom:2px solid var(--seal)"></span>')}</div>`;
+  if(q.sec==='vocab'||q.sec==='review'){ const w=q.w; prompt = q.type==='hz2vi'?`<div style="font-family:'Noto Serif SC',serif;font-size:4.5rem;line-height:1.1">${esc(w.hz)}</div>`:q.type==='vi2hz'?`<div style="font-size:1.6rem;font-weight:600">${esc(w.vi)}</div>`:`<div style="font-size:2rem;color:var(--jade);font-weight:600">${esc(w.py)}</div>`; }
+  else if(q.type==='F'||q.type==='G') prompt=`<div style="font-family:'Noto Serif SC',serif;font-size:1.3rem;line-height:1.8">${esc(q.text).replace('＿＿','<span style="display:inline-block;min-width:3em;border-bottom:2px solid var(--seal)"></span>')}</div>`;
   else prompt=`<div style="font-family:'Noto Serif SC',serif;font-size:1.1rem;line-height:1.8;background:var(--sunk);border-radius:10px;padding:10px">${esc(q.passage)}</div><div style="font-family:'Noto Serif SC',serif;font-size:1.25rem;margin-top:8px">${q.type==='T'?'★ ':''}${esc(q.text)}</div>`;
-  const secName={vocab:'Từ vựng của bài',review:'Ôn từ bài trước',read:'Đọc hiểu'}[q.sec];
+  const secName={vocab:'Từ vựng của bài',review:'Ôn từ bài trước',read:'Đọc hiểu',gram:'Ngữ pháp'}[q.sec];
   V.innerHTML=`<div class="row" style="justify-content:space-between"><div class="small muted">${esc(T.name)} · ${T.i+1}/${N}</div><button class="btn sm" id="pquit">Thoát</button></div>
    <div style="height:6px;border-radius:99px;background:var(--line);overflow:hidden;margin:8px 0"><i style="display:block;height:100%;width:${T.i/N*100}%;background:var(--jade)"></i></div>
    <div class="card" style="text-align:center;padding:20px 14px"><span class="small muted">${secName}</span><h3 style="margin:6px 0 10px;text-transform:none;letter-spacing:0;color:var(--ink);font-size:1rem">${q.title}</h3>${prompt}
@@ -461,7 +463,7 @@ function renderPResult(){
   const grp=(sec,lbl)=>{ const a=T.qs.map((q,k)=>q).filter(q=>q.sec===sec); if(!a.length) return ''; const c=a.filter(q=>T.ans[T.qs.indexOf(q)]===q.correct).length; return `<span>${lbl}: <b>${c}/${a.length}</b></span>`; };
   const wrong=T.qs.map((q,k)=>({q,a:T.ans[k],k})).filter(x=>x.a!==x.q.correct);
   const reason=q=>{
-    if(q.sec==='read') return esc(q.explain||'');
+    if(q.sec==='read'||q.sec==='gram') return esc(q.explain||'');
     const w=q.w; const ex=w.ex?`<div class="small" style="margin-top:4px">Ví dụ: <span style="font-family:'Noto Serif SC',serif">${esc(w.ex)}</span> <span class="muted">${esc(w.exv||'')}</span></div>`:'';
     return `<div class="small muted">${esc(w.hz)} · ${esc(w.py)} · ${esc(w.vi)}</div>${ex}`;
   };
@@ -469,7 +471,7 @@ function renderPResult(){
     <span class="badge ${T.pass?'b-rev':'b-learn'}">${T.pass?'ĐẠT':'CHƯA ĐẠT'}</span>
     <div style="font-size:2.6rem;font-weight:700;margin:6px 0">${Math.round(T.score*100)}%</div>
     <p class="muted small">Đúng ${ok}/${N} · cần ${need} câu (≥ ${PASS*100}%)</p>
-    <div class="row" style="justify-content:center;gap:14px" class="small">${grp('vocab','Từ vựng')} ${grp('review','Ôn từ cũ')} ${grp('read','Đọc hiểu')}</div>
+    <div class="row" style="justify-content:center;gap:14px" class="small">${grp('vocab','Từ vựng')} ${grp('review','Ôn từ cũ')} ${grp('read','Đọc hiểu')} ${grp('gram','Ngữ pháp')}</div>
     <p style="max-width:52ch;margin:10px auto">${T.pass?(nx?`Đã mở ${nx.name}.`:'Chúc mừng, bạn đã qua hết lộ trình hiện có.'):'Các từ làm sai đã được đưa lên mục Ôn hôm nay. Ôn lại rồi làm lại bài.'}</p>
     <div class="row" style="justify-content:center;margin-top:10px;gap:8px">
       ${nx?`<button class="btn pri" id="pnext">Bài kiểm tra tiếp theo</button>`:''}
@@ -478,8 +480,8 @@ function renderPResult(){
       <button class="btn" id="pback">Về màn hình chính</button></div></div>
    <h3 style="margin:14px 0 6px">Câu làm sai (${wrong.length}/${N})</h3>
    ${wrong.length?`<div class="list">${wrong.map(({q,a})=>`<div class="item" style="flex-direction:column;align-items:flex-start;gap:4px;border-left:4px solid var(--bad)">
-      <span class="small"><b>${esc(q.title)}</b> · ${q.sec==='read'?'Đọc hiểu':q.sec==='review'?'Ôn từ cũ':'Từ vựng'}</span>
-      ${q.sec==='read'?`<span class="small muted">${esc((q.passage?q.passage+' ':'')+q.text)}</span>`:''}
+      <span class="small"><b>${esc(q.title)}</b> · ${q.sec==='read'?'Đọc hiểu':q.sec==='gram'?'Ngữ pháp':q.sec==='review'?'Ôn từ cũ':'Từ vựng'}</span>
+      ${q.sec==='read'||q.sec==='gram'?`<span class="small muted">${esc((q.passage?q.passage+' ':'')+q.text)}</span>`:''}
       <span class="small">Bạn chọn: <b style="color:var(--bad)">${esc(q.opts[a]?q.opts[a].t:'(bỏ trống)')}</b> · Đáp án đúng: <b style="color:var(--jade)">${esc(q.answerText)}</b></span>
       ${reason(q)}</div>`).join('')}</div>`:'<p class="muted small">Không có câu nào làm sai.</p>'}`;
   $('#pretry').onclick=()=>startPathTest(T.id);
@@ -494,18 +496,86 @@ function renderLessons(){
    <div class="row" style="margin:10px 0">${lvs.map(x=>`<button class="chip" data-lv="${x}" aria-pressed="${x===lv}">HSK ${x} · ${PATH.filter(y=>y.lv===x&&PT.passed[y.n]).length}/${PATH.filter(y=>y.lv===x).length}</button>`).join('')}</div>
    <div class="list">${L.map(les=>{ const un=pUnlocked(les.n), p=PT.passed[les.n], seen=les.w.filter(h=>SR.c[h]).length;
      return `<div class="card" style="padding:12px;${un?'':'opacity:.6'}"><div class="row" style="justify-content:space-between"><b>${les.k}. ${esc(les.t)}</b><span class="small" style="color:${p?'var(--jade)':'var(--muted)'}">${p?'✓ Đã qua':un?`${seen}/${les.w.length} từ`:'🔒 Khóa'}</span></div>
-     ${un?`<div class="row" style="margin-top:8px"><button class="btn sm" data-learn="${les.n}">Học từ</button><button class="btn sm pri" data-test="${les.n}">${p?'Làm lại':'Kiểm tra'}</button></div>`:'<p class="small muted" style="margin:6px 0 0">Qua bài trước để mở</p>'}</div>`; }).join('')}
+     ${un?`<div class="row" style="margin-top:8px"><button class="btn sm" data-learn="${les.n}">Học từ</button>${GRAM[les.n]?`<button class="btn sm" data-gram="${les.n}">Học ngữ pháp${PT.gram&&PT.gram[les.n]&&PT.gram[les.n].best>=.8?' ✓':''}</button>`:'<button class="btn sm" disabled title="Đang soạn ngữ pháp cho cấp này">Ngữ pháp (đang soạn)</button>'}<button class="btn sm pri" data-test="${les.n}">${p?'Làm lại':'Kiểm tra'}</button></div>`:'<p class="small muted" style="margin:6px 0 0">Qua bài trước để mở</p>'}</div>`; }).join('')}
    <div class="card" style="padding:12px;${fu?'':'opacity:.6'}"><div class="row" style="justify-content:space-between"><b>Thi thử HSK ${lv}</b><span class="small" style="color:${fin?'var(--jade)':'var(--muted)'}">${fin?'✓ Đã qua':fu?'Mở':'🔒 Khóa'}</span></div>
      ${fu?`<div class="row" style="margin-top:8px"><button class="btn sm pri" data-test="f${lv}">${fin?'Thi lại':'Thi thử'}</button></div>`:'<p class="small muted" style="margin:6px 0 0">Qua hết bài của cấp để mở</p>'}</div></div>`;
   V.querySelectorAll('[data-lv]').forEach(b=>b.onclick=()=>{ ST.prof.lvView=+b.dataset.lv; save(); render(); });
   V.querySelectorAll('[data-learn]').forEach(b=>b.onclick=()=>{ const les=PATH.find(x=>x.n===+b.dataset.learn); const H=hskLessonFor(les); go('luyen',{lesson:H}); });
   V.querySelectorAll('[data-test]').forEach(b=>b.onclick=()=>startPathTest(b.dataset.test));
+  V.querySelectorAll('[data-gram]').forEach(b=>b.onclick=()=>openGrammar(+b.dataset.gram));
 }
 function forecastHTML(){
   const t=todayN(), cnt=Array(7).fill(0);
   Object.values(SR.c).forEach(c=>{ if(!c||c.q!=='review') return; const off=Math.max(0,c.dd-t); if(off<7) cnt[off]++; });
   const mx=Math.max(1,...cnt), wd=['CN','T2','T3','T4','T5','T6','T7'];
   return `<div class="card" style="margin-bottom:12px"><span class="small muted">Lịch ôn 7 ngày tới</span><div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;align-items:end;height:90px;margin-top:8px">${cnt.map((n,i)=>{ const d=new Date(); d.setDate(d.getDate()+i); return `<div style="display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;font-size:.72rem;color:var(--muted)"><span>${n}</span><i style="display:block;width:100%;max-width:32px;background:${n?'var(--jade)':'var(--line)'};border-radius:4px 4px 0 0;height:${Math.max(2,n/mx*56)}px"></i><span>${i===0?'Nay':wd[d.getDay()]}</span></div>`; }).join('')}</div></div>`;
+}
+
+/* ---------- Ngữ pháp theo bài ---------- */
+const hasHan=t=>/[㐀-鿿]/.test(t);
+function gq(x){ const ans=x.o[x.a], so=shuf2(x.o); return {sec:'gram',type:'G',title:'Ngữ pháp: chọn đáp án đúng',text:x.q,opts:so.map(v=>({t:v,han:hasHan(v)})),correct:so.indexOf(ans),answerText:ans,explain:x.e}; }
+function openGrammar(n){ SUB={gram:{n,mode:'learn'}}; render(); window.scrollTo(0,0); }
+function gramStartQuiz(){ const G=SUB.gram, D=GRAM[G.n]; G.mode='quiz'; G.qs=shuf2(D.q).map(x=>{ const ans=x.o[x.a], so=shuf2(x.o); return {q:x.q,o:so,a:so.indexOf(ans),e:x.e}; }); G.i=0; G.pick=null; G.ok=0; G.done=false; render(); window.scrollTo(0,0); }
+function gramPick(k){ const G=SUB.gram; if(G.pick!=null||G.done) return; G.pick=k; if(k===G.qs[G.i].a) G.ok++; render(); }
+function gramNext(){ const G=SUB.gram; if(G.pick==null) return; G.i++; G.pick=null; if(G.i>=G.qs.length){ G.done=true; const sc=G.ok/G.qs.length; PT.gram=PT.gram||{}; const p=PT.gram[G.n]; PT.gram[G.n]={best:Math.max(sc,p?p.best:0),date:Date.now()}; pSave(); } render(); window.scrollTo(0,0); }
+function gramKey(e){ const G=SUB.gram; if(G.done) return;
+  if(G.pick==null&&['1','2','3','4'].includes(e.key)){ e.preventDefault(); gramPick(+e.key-1); }
+  else if(G.pick!=null&&(e.key==='Enter'||e.key===' ')){ e.preventDefault(); gramNext(); } }
+function gramTokBind(){
+  V.querySelectorAll('.gp .tk').forEach(el=>el.onclick=()=>{ const card=el.closest('.gp'), box=card.querySelector('.tokbox'); const same=box.dataset.t===el.dataset.t;
+    card.querySelectorAll('.tk').forEach(x=>x.style.background=''); if(same){ box.innerHTML=''; box.dataset.t=''; return; }
+    el.style.background='var(--jade-soft)'; box.dataset.t=el.dataset.t; box.innerHTML=tokInfoHTML(el.dataset.t); });
+}
+function renderGrammar(){
+  const G=SUB.gram, L=PATH.find(x=>x.n===G.n), D=GRAM[G.n];
+  const head=`<div class="row" style="justify-content:space-between"><div class="small muted">HSK ${L.lv} · Bài ${L.k} · ${esc(L.t)}</div><button class="btn sm" id="gback">← Lộ trình</button></div>`;
+  const back=()=>{ SUB=null; render(); window.scrollTo(0,0); };
+  if(!D){ V.innerHTML=head+'<div class="card" style="margin-top:10px"><p>Ngữ pháp của bài này đang được soạn.</p></div>'; $('#gback').onclick=back; return; }
+  if(G.mode==='learn'){
+    const say=[];
+    V.innerHTML=head+`<h2 style="margin:6px 0 2px">Ngữ pháp · ${esc(L.t)}</h2>
+     <p class="muted small">${D.p.length} điểm ngữ pháp · bấm vào từ trong câu để xem pinyin, Hán Việt, nghĩa · bấm ▶ để nghe.</p>
+     <div class="list" style="margin-top:8px">${D.p.map((p,i)=>`<div class="card gp" style="padding:14px">
+       <div class="small muted">Điểm ${i+1}/${D.p.length}</div>
+       <h3 style="margin:2px 0 8px;text-transform:none;letter-spacing:0;color:var(--ink);font-size:1.08rem">${esc(p.t)}</h3>
+       <div style="font-family:'Noto Serif SC',serif;background:var(--sunk);border-left:4px solid var(--jade);border-radius:8px;padding:8px 12px;font-size:1.05rem">${esc(p.f)}</div>
+       <p style="margin:8px 0">${esc(p.e)}</p>
+       ${p.v?`<p class="small" style="margin:6px 0;background:var(--jade-soft);border-radius:8px;padding:6px 10px"><b>So với tiếng Việt:</b> ${esc(p.v)}</p>`:''}
+       <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px">${p.ex.map(x=>{ say.push(x[0]); return `<div class="row" style="gap:10px;align-items:flex-start;flex-wrap:nowrap"><button class="btn sm" data-say="${say.length-1}" aria-label="Nghe">▶</button><div><div style="font-family:'Noto Serif SC',serif;font-size:1.2rem;line-height:1.6">${segHTML(x[0])}</div><div style="color:var(--jade);font-size:.88rem">${esc(x[1])}</div><div class="muted small">${esc(x[2])}</div></div></div>`; }).join('')}</div>
+       ${p.m?`<div class="small" style="margin-top:10px;display:grid;gap:4px"><div><b style="color:var(--bad)">✗</b> <span style="font-family:'Noto Serif SC',serif;text-decoration:line-through;color:var(--bad)">${esc(p.m[0])}</span></div><div><b style="color:var(--jade)">✓</b> <span style="font-family:'Noto Serif SC',serif">${esc(p.m[1])}</span></div></div>`:''}
+       <div class="tokbox" data-t=""></div></div>`).join('')}</div>
+     <div class="card" style="margin-top:12px;text-align:center;padding:16px">
+       <p style="margin:0 0 10px">Luyện ${D.q.length} câu ngữ pháp, có giải thích ngay sau mỗi câu.${PT.gram&&PT.gram[G.n]?` Điểm cao nhất: <b>${Math.round(PT.gram[G.n].best*100)}%</b>.`:''}</p>
+       <div class="row" style="justify-content:center;gap:8px"><button class="btn pri" id="gquiz">Luyện ngữ pháp</button><button class="btn" id="gtest">Kiểm tra bài này</button></div></div>`;
+    $('#gback').onclick=back;
+    $('#gquiz').onclick=gramStartQuiz;
+    $('#gtest').onclick=()=>startPathTest(G.n);
+    V.querySelectorAll('[data-say]').forEach(b=>b.onclick=()=>playRef(say[+b.dataset.say]));
+    gramTokBind(); return;
+  }
+  if(G.done){
+    const N=G.qs.length, sc=G.ok/N;
+    V.innerHTML=head+`<div class="card" style="text-align:center;padding:22px 14px;margin-top:10px">
+      <div class="small muted">Luyện ngữ pháp</div><div style="font-size:2.6rem;font-weight:700;margin:6px 0">${Math.round(sc*100)}%</div>
+      <p class="muted small">Đúng ${G.ok}/${N}. ${sc>=.8?'Bạn đã nắm được ngữ pháp bài này, có thể làm bài kiểm tra.':'Xem lại các điểm ngữ pháp rồi luyện lại.'}</p>
+      <div class="row" style="justify-content:center;gap:8px;margin-top:10px">${sc>=.8?'<button class="btn pri" id="gtest">Kiểm tra bài này</button>':''}<button class="btn${sc>=.8?'':' pri'}" id="glearn">Xem lại ngữ pháp</button><button class="btn" id="gagain">Luyện lại</button><button class="btn" id="gback2">Về lộ trình</button></div></div>`;
+    $('#gback').onclick=back; $('#gback2').onclick=back;
+    const t=$('#gtest'); if(t) t.onclick=()=>startPathTest(G.n);
+    $('#glearn').onclick=()=>{ G.mode='learn'; render(); window.scrollTo(0,0); };
+    $('#gagain').onclick=gramStartQuiz; return;
+  }
+  const q=G.qs[G.i], N=G.qs.length, ans=G.pick!=null;
+  const qhtml=esc(q.q).replace('＿＿','<span style="display:inline-block;min-width:3em;border-bottom:2px solid var(--seal)"></span>');
+  V.innerHTML=head+`<div style="height:6px;border-radius:99px;background:var(--line);overflow:hidden;margin:8px 0"><i style="display:block;height:100%;width:${(G.i+(ans?1:0))/N*100}%;background:var(--jade)"></i></div>
+   <div class="card" style="text-align:center;padding:20px 14px"><span class="small muted">Luyện ngữ pháp · ${G.i+1}/${N}</span>
+     <div style="font-family:'Noto Serif SC',serif;font-size:1.3rem;line-height:1.8;margin-top:8px">${qhtml}</div></div>
+   <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px">${q.o.map((o,i)=>{ const st=!ans?'':i===q.a?'border-color:var(--jade);background:var(--jade-soft)':i===G.pick?'border-color:var(--bad);color:var(--bad)':'opacity:.55';
+     return `<button class="btn" data-gi="${i}" ${ans?'disabled':''} style="${hasHan(o)?"font-family:'Noto Serif SC',serif;font-size:1.2rem;":''}${st}"><small style="opacity:.6;margin-right:6px">${i+1}</small>${esc(o)}</button>`; }).join('')}</div>
+   ${ans?`<div class="card" style="margin-top:10px;border-left:4px solid ${G.pick===q.a?'var(--jade)':'var(--bad)'}"><b style="color:${G.pick===q.a?'var(--jade)':'var(--bad)'}">${G.pick===q.a?'Đúng rồi!':'Chưa đúng.'}</b> ${G.pick===q.a?'':`Đáp án: <b style="font-family:'Noto Serif SC',serif">${esc(q.o[q.a])}</b>. `}${esc(q.e)}
+     <div style="text-align:right;margin-top:8px"><button class="btn pri" id="gnext">${G.i<N-1?'Câu tiếp':'Xem kết quả'} <small style="opacity:.7">(Enter)</small></button></div></div>`:'<p class="muted small" style="margin-top:8px">Bấm phím <b>1</b>–<b>4</b> để chọn đáp án.</p>'}`;
+  $('#gback').onclick=back;
+  V.querySelectorAll('[data-gi]').forEach(b=>b.onclick=()=>gramPick(+b.dataset.gi));
+  const nb=$('#gnext'); if(nb){ nb.onclick=gramNext; nb.focus({preventScroll:true}); }
 }
 
 /* Tiến bộ */
@@ -547,7 +617,7 @@ function renderSettings(){
     <div class="row"><button class="btn" id="sv">Lưu</button><button class="btn" id="exp">Xuất tiến độ</button><label class="btn" style="cursor:pointer">Nhập tiến độ<input type="file" id="imp" accept=".json" hidden></label></div>
     <div class="field">Đồng bộ từ Sổ Từ HSK: dán đoạn đã sao chép từ mục “Xuất tiến trình sang ứng dụng Luyện nói”<textarea id="swin" placeholder="Dán đoạn JSON vào đây" style="min-height:90px;font-size:.8rem"></textarea></div>
     <div class="row"><button class="btn" id="swgo">Nhập tiến trình từ Sổ Từ HSK</button></div>
-    <p class="note">Tiến độ lưu trong trình duyệt của máy này. Dùng Xuất/Nhập để chuyển sang máy khác. Phiên bản ứng dụng: v14.</p>
+    <p class="note">Tiến độ lưu trong trình duyệt của máy này. Dùng Xuất/Nhập để chuyển sang máy khác. Phiên bản ứng dụng: v15.</p>
    </div>`;
   $('#test').onclick=async()=>{ ST.az.key=$('#k').value.trim(); ST.az.region=$('#rg').value; ST.az.ok=false; save(); const tr=$('#tr');
     if(!ST.az.key){ tr.textContent='Chưa nhập key.'; render(); return; }
@@ -573,6 +643,7 @@ window.addEventListener('hashchange',()=>{ const h=location.hash.slice(1); if(h&
 document.addEventListener('keydown',e=>{
   if(e.ctrlKey||e.metaKey||e.altKey) return;
   const tg=e.target; if(tg&&(/^(INPUT|TEXTAREA|SELECT)$/.test(tg.tagName)||tg.isContentEditable)) return;
+  if(view==='luyen'&&SUB&&SUB.gram&&SUB.gram.mode==='quiz'){ gramKey(e); return; }
   if(view==='luyen'&&SUB&&SUB.ptest&&!SUB.ptest.done){
     if(['1','2','3','4'].includes(e.key)){ const b=V.querySelector(`[data-i="${+e.key-1}"]`); if(b){ e.preventDefault(); b.click(); } }
     return;
