@@ -448,22 +448,42 @@ function finishPTest(){
   if(T.pass){ const p=PT.passed[T.key]; PT.passed[T.key]={best:Math.max(T.score,p?p.best:0),date:Date.now()}; }
   pSave(); srsSave(); T.wrong=wrong.length;
 }
+function nextTestOf(id){
+  if(String(id)[0]==='f'){ const lv=+String(id).slice(1); const nx=PATH.find(x=>x.lv===lv+1&&x.k===1); return nx?{id:nx.n,name:`Bài 1 · ${nx.t} (HSK ${nx.lv})`}:null; }
+  const L=PATH.find(x=>x.n===id); const nx=PATH.find(x=>x.n===id+1&&x.lv===L.lv);
+  if(nx) return {id:nx.n,name:`Bài ${nx.k} · ${nx.t}`};
+  return {id:'f'+L.lv,name:`Thi thử HSK ${L.lv}`};
+}
 function renderPResult(){
-  const T=SUB.ptest, N=T.qs.length, need=Math.ceil(PASS*N);
-  let nextTxt='';
-  if(T.pass){ if(String(T.id)[0]==='f'){ const nl=+String(T.id).slice(1)+1; nextTxt=PATH.some(x=>x.lv===nl)?`Đã mở HSK ${nl}.`:'Chúc mừng, bạn đã qua hết lộ trình.'; } else { const L=PATH.find(x=>x.n===T.id); const nx=PATH.find(x=>x.n===T.id+1); nextTxt=nx&&nx.lv===L.lv?`Đã mở bài ${nx.k}.`:(PATH.some(x=>x.lv===L.lv+1)?`Đã mở thi thử HSK ${L.lv}.`:''); } }
-  const grp=(sec,lbl)=>{ const a=T.qs.map((q,k)=>[q,T.ans[k]]).filter(([q])=>q.sec===sec); return a.length?`<span>${lbl}: <b>${a.filter(([q,x])=>x===q.correct).length}/${a.length}</b></span>`:''; };
+  const T=SUB.ptest, N=T.qs.length, need=Math.ceil(PASS*N), ok=T.qs.filter((q,k)=>T.ans[k]===q.correct).length;
+  const nx=T.pass?nextTestOf(T.id):null;
+  const grp=(sec,lbl)=>{ const a=T.qs.map((q,k)=>q).filter(q=>q.sec===sec); if(!a.length) return ''; const c=a.filter(q=>T.ans[T.qs.indexOf(q)]===q.correct).length; return `<span>${lbl}: <b>${c}/${a.length}</b></span>`; };
+  const wrong=T.qs.map((q,k)=>({q,a:T.ans[k],k})).filter(x=>x.a!==x.q.correct);
+  const reason=q=>{
+    if(q.sec==='read') return esc(q.explain||'');
+    const w=q.w; const ex=w.ex?`<div class="small" style="margin-top:4px">Ví dụ: <span style="font-family:'Noto Serif SC',serif">${esc(w.ex)}</span> <span class="muted">${esc(w.exv||'')}</span></div>`:'';
+    return `<div class="small muted">${esc(w.hz)} · ${esc(w.py)} · ${esc(w.vi)}</div>${ex}`;
+  };
   V.innerHTML=`<div class="card" style="text-align:center;padding:22px 14px">
     <span class="badge ${T.pass?'b-rev':'b-learn'}">${T.pass?'ĐẠT':'CHƯA ĐẠT'}</span>
     <div style="font-size:2.6rem;font-weight:700;margin:6px 0">${Math.round(T.score*100)}%</div>
-    <p class="muted small">Đúng ${Math.round(T.score*N)}/${N} · cần ${need} câu (≥ ${PASS*100}%)</p>
+    <p class="muted small">Đúng ${ok}/${N} · cần ${need} câu (≥ ${PASS*100}%)</p>
     <div class="row" style="justify-content:center;gap:14px" class="small">${grp('vocab','Từ vựng')} ${grp('review','Ôn từ cũ')} ${grp('read','Đọc hiểu')}</div>
-    <p style="max-width:52ch;margin:10px auto">${T.pass?nextTxt:'Từ làm sai đã được đưa vào mục Ôn hôm nay. Ôn lại rồi làm lại bài.'}</p>
-    <div class="row" style="justify-content:center;margin-top:10px"><button class="btn sm" id="pretry">Làm lại</button>${T.pass?'':'<button class="btn sm pri" id="pstudy">Ôn hôm nay</button>'}<button class="btn sm" id="pback">Về lộ trình</button></div></div>
-   ${T.wrong?`<p class="small muted" style="margin-top:8px">Có ${T.wrong} từ làm sai. Xem đáp án các câu đúng/sai trong bài này bên dưới.</p>`:''}
-   <div class="list" style="margin-top:8px">${T.qs.map((q,k)=>{ const a=T.ans[k], ok=a===q.correct; return `<div class="item" style="flex-direction:column;align-items:flex-start;gap:4px;border-left:4px solid ${ok?'var(--jade)':'var(--bad)'}"><span class="small muted">${q.sec==='read'?esc((q.passage?q.passage+' ':'')+q.text):esc(q.explain)}</span><span class="small">${ok?'✓ Đúng':'✗ Bạn chọn: '+esc(q.opts[a]?q.opts[a].t:'–')+' · Đáp án: '+esc(q.answerText)}</span>${q.sec==='read'&&!ok?`<span class="small muted">${esc(q.explain)}</span>`:''}</div>`; }).join('')}</div>`;
+    <p style="max-width:52ch;margin:10px auto">${T.pass?(nx?`Đã mở ${nx.name}.`:'Chúc mừng, bạn đã qua hết lộ trình hiện có.'):'Các từ làm sai đã được đưa lên mục Ôn hôm nay. Ôn lại rồi làm lại bài.'}</p>
+    <div class="row" style="justify-content:center;margin-top:10px;gap:8px">
+      ${nx?`<button class="btn pri" id="pnext">Bài kiểm tra tiếp theo</button>`:''}
+      <button class="btn" id="pretry">Làm lại bài này</button>
+      ${T.pass?'':'<button class="btn" id="pstudy">Ôn hôm nay</button>'}
+      <button class="btn" id="pback">Về màn hình chính</button></div></div>
+   <h3 style="margin:14px 0 6px">Câu làm sai (${wrong.length}/${N})</h3>
+   ${wrong.length?`<div class="list">${wrong.map(({q,a})=>`<div class="item" style="flex-direction:column;align-items:flex-start;gap:4px;border-left:4px solid var(--bad)">
+      <span class="small"><b>${esc(q.title)}</b> · ${q.sec==='read'?'Đọc hiểu':q.sec==='review'?'Ôn từ cũ':'Từ vựng'}</span>
+      ${q.sec==='read'?`<span class="small muted">${esc((q.passage?q.passage+' ':'')+q.text)}</span>`:''}
+      <span class="small">Bạn chọn: <b style="color:var(--bad)">${esc(q.opts[a]?q.opts[a].t:'(bỏ trống)')}</b> · Đáp án đúng: <b style="color:var(--jade)">${esc(q.answerText)}</b></span>
+      ${reason(q)}</div>`).join('')}</div>`:'<p class="muted small">Không có câu nào làm sai.</p>'}`;
   $('#pretry').onclick=()=>startPathTest(T.id);
-  $('#pback').onclick=()=>{ SUB=null; render(); };
+  $('#pback').onclick=()=>{ SUB=null; render(); window.scrollTo(0,0); };
+  const pn=$('#pnext'); if(pn) pn.onclick=()=>startPathTest(nx.id);
   const ps=$('#pstudy'); if(ps) ps.onclick=()=>go('on-tu');
 }
 function renderLessons(){
