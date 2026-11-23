@@ -542,7 +542,7 @@ function renderGrammar(){
        <div style="font-family:'Noto Serif SC',serif;background:var(--sunk);border-left:4px solid var(--jade);border-radius:8px;padding:8px 12px;font-size:1.05rem">${esc(p.f)}</div>
        <p style="margin:8px 0">${esc(p.e)}</p>
        ${p.v?`<p class="small" style="margin:6px 0;background:var(--jade-soft);border-radius:8px;padding:6px 10px"><b>So với tiếng Việt:</b> ${esc(p.v)}</p>`:''}
-       <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px">${p.ex.map(x=>{ say.push(x[0]); return `<div class="row" style="gap:10px;align-items:flex-start;flex-wrap:nowrap"><button class="btn sm" data-say="${say.length-1}" aria-label="Nghe">▶</button><div><div style="font-family:'Noto Serif SC',serif;font-size:1.2rem;line-height:1.6">${segHTML(x[0])}</div><div style="color:var(--jade);font-size:.88rem">${esc(x[1])}</div><div class="muted small">${esc(x[2])}</div></div></div>`; }).join('')}</div>
+       <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px">${p.ex.map(x=>{ say.push(x[0]); return `<div class="row" style="gap:10px;align-items:flex-start;flex-wrap:nowrap"><div style="display:flex;flex-direction:column;gap:4px"><button class="btn sm" data-say="${say.length-1}" aria-label="Nghe">▶</button><button class="btn sm" data-ws="${esc(x[0])}" aria-label="Luyện viết câu này" title="Luyện viết câu này">🖌</button></div><div><div style="font-family:'Noto Serif SC',serif;font-size:1.2rem;line-height:1.6">${segHTML(x[0])}</div><div style="color:var(--jade);font-size:.88rem">${esc(x[1])}</div><div class="muted small">${esc(x[2])}</div></div></div>`; }).join('')}</div>
        ${p.m?`<div class="small" style="margin-top:10px;display:grid;gap:4px"><div><b style="color:var(--bad)">✗</b> <span style="font-family:'Noto Serif SC',serif;text-decoration:line-through;color:var(--bad)">${esc(p.m[0])}</span></div><div><b style="color:var(--jade)">✓</b> <span style="font-family:'Noto Serif SC',serif">${esc(p.m[1])}</span></div></div>`:''}
        <div class="tokbox" data-t=""></div></div>`).join('')}</div>
      <div class="card" style="margin-top:12px;text-align:center;padding:16px">
@@ -587,7 +587,8 @@ function wMigrate(o){
   if(!o||typeof o!=='object') o={};
   if(!o.v){ o.writing=o.writing||o.c||{}; delete o.c; o.v=1; }
   o.writing=o.writing||{}; o.hist=Array.isArray(o.hist)?o.hist:[];
-  o.set=Object.assign({grid:'tian',newPerDay:8,day:null,newToday:0,lv:1,hwOnly:false},o.set||{});
+  o.set=Object.assign({grid:'tian',newPerDay:8,day:null,newToday:0,lv:1,hwOnly:false,tab:'char',smode:'copy'},o.set||{});
+  o.sent=o.sent||{}; o.shist=Array.isArray(o.shist)?o.shist:[];
   return o;
 }
 let WR=wMigrate((()=>{ try{ return JSON.parse(localStorage.getItem(WKEY)||'null'); }catch(e){ return null; } })());
@@ -632,7 +633,7 @@ function wMount(c,opt){
   ['touchstart','touchmove'].forEach(ev=>box.addEventListener(ev,e=>{ if(e.cancelable) e.preventDefault(); },{passive:false}));
   try{ WW=HanziWriter.create($('#wtarget'),c,Object.assign({width:sz,height:sz,padding:Math.round(sz*.06),strokeColor:wTok('--ink'),radicalColor:wTok('--seal'),outlineColor:wTok('--line'),
     highlightColor:wTok('--jade'),drawingColor:wTok('--ink'),drawingWidth:Math.max(6,Math.round(sz/38)),strokeAnimationSpeed:1,delayBetweenStrokes:250,
-    charDataLoader:(ch,ok,err)=>loadStrokes().then(D=>D[ch]?ok(D[ch]):err()).catch(err)},opt)); }catch(e){ WW=null; }
+    charDataLoader:(ch,ok,err)=>loadStrokes().then(D=>D[ch]?ok(D[ch]):fetch('https://cdn.jsdelivr.net/npm/hanzi-writer-data@2.0/'+encodeURIComponent(ch)+'.json').then(r=>{ if(!r.ok) throw 0; return r.json(); }).then(ok)).catch(err)},opt)); }catch(e){ WW=null; }
   return WW;
 }
 const WSTEPS=['Hiểu chữ','Xem nét','Tô theo','Viết có gợi ý','Viết nhớ'];
@@ -661,11 +662,15 @@ function wSession(){ const {due,fresh}=wQueue(); const items=due.map(c=>({c,rev:
 function renderWrite(){
   if(!WD){ V.innerHTML='<p class="muted"><span class="spin"></span> Đang tải dữ liệu chữ…</p>'; Promise.all([loadWD(),loadStrokes(),loadHW()]).then(render).catch(()=>{ V.innerHTML='<div class="card"><p>Không tải được dữ liệu luyện viết. Lần đầu cần có mạng; sau đó dùng được khi offline.</p><button class="btn" id="wre">Thử lại</button></div>'; $('#wre').onclick=render; }); return; }
   if(SUB&&SUB.learn) return renderWLearn();
+  if(SUB&&SUB.sent) return renderSent();
+  const tabs=`<div class="row" style="gap:6px;margin:8px 0 4px"><button class="chip" data-wtab="char" aria-pressed="${WR.set.tab!=='sent'}" style="flex:1;min-height:44px">Từng chữ</button><button class="chip" data-wtab="sent" aria-pressed="${WR.set.tab==='sent'}" style="flex:1;min-height:44px">Viết câu</button></div>`;
+  const bindTabs=()=>V.querySelectorAll('[data-wtab]').forEach(b=>b.onclick=()=>{ WR.set.tab=b.dataset.wtab; wSave(); render(); });
+  if(WR.set.tab==='sent'){ V.innerHTML=`<h2>Luyện viết chữ Hán</h2>`+tabs+`<div class="row" style="gap:6px;margin-top:6px">${[1,2,3,4,5].map(l=>`<button class="chip" data-wlv="${l}" aria-pressed="${l===WR.set.lv}">Đến HSK ${l}</button>`).join('')}</div>`+renderSentHome(); bindTabs(); V.querySelectorAll('[data-wlv]').forEach(b=>b.onclick=()=>{ WR.set.lv=+b.dataset.wlv; WR.set.sgroup=null; wSave(); render(); }); bindSentHome(); return; }
   const s=WR.set, now=Date.now(), t=wToday(), {due,fresh}=wQueue();
   const pool=wPool(), learned=Object.keys(WR.writing).filter(c=>WR.writing[c].card).length;
   const lvs=[1,2,3,4,5], st=c=>{ const k=wState(c); if(!k) return ''; if(wIsDue(c,now,t)) return 'due'; return k.q==='review'&&k.iv>=21?'mat':'lrn'; };
   const col={due:'background:var(--warn-soft);border-color:var(--warn)',mat:'background:var(--jade);color:var(--surface);border-color:var(--jade)',lrn:'background:var(--jade-soft);border-color:var(--jade)','':''};
-  V.innerHTML=`<h2>Luyện viết chữ Hán</h2>
+  V.innerHTML=`<h2>Luyện viết chữ Hán</h2>${tabs}
    <p class="muted small">Mỗi chữ học qua 5 bước: hiểu chữ → xem nét → tô → viết có gợi ý → viết nhớ. Lịch ôn viết tách riêng với ôn nhận diện ở tab Ôn từ.</p>
    <div class="kpi" style="margin:10px 0"><div><b>${due.length}</b><span>chữ đến hạn ôn</span></div><div><b>${s.newToday}/${s.newPerDay}</b><span>chữ mới hôm nay</span></div><div><b>${learned}</b><span>chữ đã học viết</span></div></div>
    <button class="btn pri" id="wgo" style="width:100%">${due.length+fresh.length?`Bắt đầu: ôn ${due.length} chữ + học ${fresh.length} chữ mới`:'Hôm nay đã xong ✓'}</button>
@@ -678,7 +683,7 @@ function renderWrite(){
    <h3 style="margin-top:16px">${pool.length} chữ · bấm vào chữ để học</h3>
    <p class="small muted" style="margin:0 0 6px"><span style="padding:0 6px;border-radius:4px;${col.lrn}">đang học</span> <span style="padding:0 6px;border-radius:4px;${col.due}">đến hạn</span> <span style="padding:0 6px;border-radius:4px;${col.mat}">đã vững</span></p>
    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(48px,1fr));gap:6px">${pool.map(c=>`<button class="btn" data-wc="${esc(c)}" style="font-family:'Noto Serif SC',serif;font-size:1.35rem;padding:4px;${col[st(c)]}" title="${esc(WD[c].py+' · '+WD[c].hv)}">${esc(c)}</button>`).join('')}</div>`;
-  $('#wgo').onclick=wSession;
+  bindTabs(); $('#wgo').onclick=wSession;
   V.querySelectorAll('[data-wlv]').forEach(b=>b.onclick=()=>{ WR.set.lv=+b.dataset.wlv; wSave(); render(); });
   $('#whw').onchange=e=>{ WR.set.hwOnly=e.target.checked; wSave(); render(); };
   $('#wgrid').onchange=e=>{ WR.set.grid=e.target.value; wSave(); };
@@ -754,6 +759,7 @@ function renderWDone(){
   $('#wmore').onclick=wSession; $('#wlist').onclick=()=>go('viet');
 }
 function wKey(e){
+  if(SUB&&SUB.sent){ if(e.key==='Enter'){ const b=$('#snext'); if(b&&document.activeElement!==b){ e.preventDefault(); b.click(); } } return true; }
   if(!(SUB&&SUB.learn)) return false;
   if(e.key==='Enter'){ const b=$('#wnext'); if(b&&document.activeElement!==b){ e.preventDefault(); b.click(); return true; } }
   return false;
@@ -770,9 +776,125 @@ function writeProgressHTML(){
   return `<h3>Luyện viết</h3>
    <div class="kpi" style="margin:10px 0"><div><b>${s.learned}</b><span>chữ đã học viết</span></div><div><b>${s.mat}</b><span>chữ viết vững (≥ 21 ngày)</span></div><div><b>${s.acc==null?'—':s.acc+'%'}</b><span>viết nhớ đạt (30 ngày)</span></div></div>
    <div class="card"><div class="days">${s.days.map(d=>`<div style="height:${d.n/mx*100}%" title="${d.n} lượt viết"><span>${d.d.getDate()}</span></div>`).join('')}</div><div style="height:18px"></div></div>
+   <p class="small muted" style="margin:6px 0 0">Viết câu: <b>${Object.keys(WR.sent||{}).length}</b> câu đã viết${(WR.shist||[]).length?` · điểm TB 20 lần gần nhất <b>${Math.round(WR.shist.slice(-20).reduce((a,x)=>a+x.sc,0)/Math.min(20,WR.shist.length))}%</b>`:''}</p>
    <div class="acts" style="justify-content:flex-start;margin-top:8px"><button class="btn" id="pw-go">Mở Luyện viết</button></div>`;
 }
 document.addEventListener('click',e=>{ const b=e.target.closest&&e.target.closest('[data-wr]'); if(!b) return; e.preventDefault(); wOpen(b.dataset.wr); });
+
+/* ---------- Luyện viết câu ---------- */
+// 3 chế độ: Chép (có nét mờ) → Nghe viết (pinyin + âm thanh) → Dịch viết (chỉ nghĩa tiếng Việt)
+const SMODES={copy:{n:'Chép câu',d:'Nhìn câu chữ Hán, viết theo nét mờ.'},dict:{n:'Nghe viết',d:'Nghe và nhìn pinyin, tự viết chữ Hán.'},tran:{n:'Dịch viết',d:'Chỉ xem nghĩa tiếng Việt, tự viết cả câu.'}};
+let SENTS=null;
+function sentAll(){
+  if(SENTS) return SENTS; const seen=new Set(), out=[];
+  const add=(zh,py,vi,lv,src,ord)=>{ if(!zh||seen.has(zh)) return; const cs=[...zh].filter(c=>HANRE.test(c)); if(cs.length<2||cs.length>16) return; seen.add(zh); out.push({zh,py:py||'',vi:vi||'',lv,src,ord,cs}); };
+  HSK.forEach(G=>G.lessons.forEach((L,li)=>L.items.forEach(it=>add(it.ex,it.exp,it.exv,G.lv,`HSK ${G.lv} · ${L.title}`,G.lv*1000+li))));
+  PATH.forEach(L=>{ const g=GRAM[L.n]; if(g) g.p.forEach(p=>p.ex.forEach(x=>add(x[0],x[1],x[2],L.lv,`Ngữ pháp · ${L.t}`,L.lv*1000+500+L.k))); });
+  return (SENTS=out.sort((a,b)=>a.ord-b.ord));
+}
+function sentLearnedRatio(s){ const k=s.cs.filter(c=>WR.writing[c]&&WR.writing[c].card).length; return k/s.cs.length; }
+function sentPick(n){
+  const lv=WR.set.lv, S=WR.sent||{}, pool=sentAll().filter(s=>s.lv<=lv);
+  const fresh=pool.filter(s=>!S[s.zh]).sort((a,b)=>sentLearnedRatio(b)-sentLearnedRatio(a)||a.ord-b.ord);
+  const weak=pool.filter(s=>S[s.zh]&&S[s.zh].best<.8).sort((a,b)=>S[a.zh].last-S[b.zh].last);
+  return weak.slice(0,Math.ceil(n/3)).concat(fresh).slice(0,n);
+}
+function wOpenSent(zh){ loadWD().then(()=>{ const s=sentAll().find(x=>x.zh===zh)||{zh,py:'',vi:'',lv:0,src:'',cs:[...zh].filter(c=>HANRE.test(c))}; go('viet',{sent:{q:[s],i:0,mode:WR.set.smode||'copy'}}); }).catch(()=>toast('Không tải được dữ liệu viết (cần mạng lần đầu).')); }
+function sentStart(list){ if(!list.length){ toast('Không còn câu phù hợp trong phạm vi này.'); return; } go('viet',{sent:{q:list,i:0,mode:WR.set.smode||'copy'}}); }
+function renderSentHome(){
+  const S=WR.sent||{}, lv=WR.set.lv, pool=sentAll().filter(s=>s.lv<=lv), done=pool.filter(s=>S[s.zh]), mode=WR.set.smode||'copy';
+  const avg=done.length?Math.round(done.reduce((a,s)=>a+S[s.zh].best,0)/done.length*100):null;
+  const groups={}; pool.forEach(s=>{ (groups[s.src]=groups[s.src]||[]).push(s); });
+  const keys=Object.keys(groups); const cur=WR.set.sgroup&&groups[WR.set.sgroup]?WR.set.sgroup:keys[0];
+  return `<div class="kpi" style="margin:10px 0"><div><b>${done.length}</b><span>câu đã viết</span></div><div><b>${avg==null?'—':avg+'%'}</b><span>độ chính xác TB</span></div><div><b>${pool.length}</b><span>câu trong phạm vi</span></div></div>
+   <h3>Chế độ</h3><div class="row" style="gap:6px">${Object.entries(SMODES).map(([k,m])=>`<button class="chip" data-smode="${k}" aria-pressed="${k===mode}" style="min-height:44px">${m.n}</button>`).join('')}</div>
+   <p class="small muted" style="margin:6px 0 10px">${SMODES[mode].d} Nên đi theo thứ tự: chép → nghe viết → dịch viết.</p>
+   <button class="btn pri" id="sgo" style="width:100%">Viết 5 câu (ưu tiên câu có chữ đã học viết)</button>
+   <h3 style="margin-top:16px">Chọn câu theo bài</h3>
+   <select id="sgrp" style="width:100%;min-height:44px">${keys.map(k=>`<option ${k===cur?'selected':''}>${esc(k)}</option>`).join('')}</select>
+   <div class="list" style="margin-top:8px">${(groups[cur]||[]).map(s=>{ const r=S[s.zh]; const col=!r?'':r.best>=.9?'var(--jade)':r.best>=.6?'var(--warn)':'var(--bad)';
+     return `<button class="item" data-sz="${esc(s.zh)}" style="min-height:48px"><div><div style="font-family:'Noto Serif SC',serif;font-size:1.1rem">${esc(s.zh)}</div><div class="small muted">${esc(s.vi)}</div></div><span class="small" style="color:${col};font-weight:700">${r?Math.round(r.best*100)+'%':''}</span></button>`; }).join('')}</div>`;
+}
+function bindSentHome(){
+  V.querySelectorAll('[data-smode]').forEach(b=>b.onclick=()=>{ WR.set.smode=b.dataset.smode; wSave(); render(); });
+  $('#sgo').onclick=()=>sentStart(sentPick(5));
+  $('#sgrp').onchange=e=>{ WR.set.sgroup=e.target.value; wSave(); render(); };
+  V.querySelectorAll('[data-sz]').forEach(b=>b.onclick=()=>{ const s=sentAll().find(x=>x.zh===b.dataset.sz); sentStart([s]); });
+}
+function sentRecord(T){
+  const s=T.s, res=T.res, ok=res.filter(r=>r.m<=2&&!r.skip).length, sc=ok/res.length;
+  WR.sent=WR.sent||{}; const p=WR.sent[s.zh]; WR.sent[s.zh]={best:Math.max(sc,p?p.best:0),n:(p?p.n:0)+1,last:Date.now(),mode:T.mode};
+  WR.shist=WR.shist||[]; WR.shist.push({t:Date.now(),s:s.zh,sc:Math.round(sc*100),mode:T.mode}); if(WR.shist.length>1000) WR.shist=WR.shist.slice(-1000);
+  // chữ đã học viết và đang đến hạn: tính luôn là một lượt ôn viết (chỉ khi viết không có nét mờ)
+  if(T.mode!=='copy'){ const now=Date.now(), t=todayN(); res.forEach(r=>{ if(r.dup) return; if(WR.writing[r.c]&&WR.writing[r.c].card&&wIsDue(r.c,now,t)) wRecord(r.c,wGrade(r.m,0,r.skip),r.m,false); }); }
+  wSave(); return sc;
+}
+function renderSent(){
+  const Q=SUB.sent; if(Q.i>=Q.q.length) return renderSentDone();
+  const s=Q.q[Q.i];
+  if(!Q.cur||Q.cur.s!==s||Q.cur.mode!==Q.mode){ const seen=new Set(); Q.cur={s,mode:Q.mode,k:0,res:[],peek:false,done:false,units:[...s.zh].map(ch=>({ch,han:HANRE.test(ch)}))}; Q.cur.units.forEach(u=>{ if(u.han){ u.dup=seen.has(u.ch); seen.add(u.ch); } }); }
+  const T=Q.cur, hz=T.units.filter(u=>u.han), N=hz.length, cur=hz[T.k], mode=T.mode;
+  const head=`<div class="row" style="justify-content:space-between"><div class="small muted">Viết câu · ${SMODES[mode].n} · ${Q.i+1}/${Q.q.length}</div><button class="btn sm" id="sback">← Danh sách câu</button></div>`;
+  let hz_i=-1;
+  const strip=`<div style="display:flex;flex-wrap:wrap;gap:4px;justify-content:center;margin:10px 0">${T.units.map(u=>{ if(!u.han) return `<span style="font-family:'Noto Serif SC',serif;font-size:1.4rem;align-self:flex-end">${esc(u.ch)}</span>`;
+     hz_i++; const r=T.res[hz_i], isCur=hz_i===T.k&&!T.done, show=r||mode==='copy'||T.done;
+     const col=r?(r.skip?'var(--bad)':r.m===0?'var(--jade)':r.m<=2?'var(--warn)':'var(--bad)'):'var(--muted)';
+     return `<span style="width:36px;height:40px;display:grid;place-items:center;border:${isCur?'2px solid var(--jade)':'1px solid var(--line)'};border-radius:6px;background:var(--surface);font-family:'Noto Serif SC',serif;font-size:1.35rem;color:${r?col:'var(--muted)'};${!r&&mode==='copy'&&!isCur?'opacity:.45':''}">${show?esc(u.ch):''}</span>`; }).join('')}</div>`;
+  const prompt=mode==='copy'?`<div style="font-family:'Noto Serif SC',serif;font-size:1.25rem">${esc(s.zh)}</div><div class="small" style="color:var(--jade)">${esc(s.py)}</div><div class="small muted">${esc(s.vi)}</div>`
+    :mode==='dict'?`<div style="color:var(--jade);font-weight:600">${esc(s.py)}</div><div class="small muted">${esc(s.vi)}</div>`
+    :`<div style="font-weight:600">${esc(s.vi)}</div>${T.peek?`<div class="small" style="color:var(--jade)">${esc(s.py)}</div>`:''}`;
+  V.innerHTML=head+`<div class="card" style="padding:12px;text-align:center">${prompt}
+     <div class="row" style="justify-content:center;gap:6px;margin-top:6px"><button class="btn sm" id="ssay">🔊 Nghe câu</button>${mode==='tran'&&!T.peek?'<button class="btn sm" id="speek">Gợi ý pinyin</button>':''}</div></div>
+   ${strip}
+   ${T.done?'':`<div class="card" style="padding:10px"><div class="small muted" style="text-align:center;margin-bottom:6px">Chữ ${T.k+1}/${N}${cur.dup?' · đã viết ở trên, viết lại':''}</div>
+     <div id="wbox" style="position:relative;margin:0 auto;touch-action:none;user-select:none;-webkit-user-select:none;background:var(--surface);border-radius:8px"></div>
+     <div id="wfb" class="small" style="text-align:center;min-height:1.6em;margin-top:6px"></div>
+     <div class="acts" style="margin-top:4px"><button class="btn" id="sskip">${mode==='copy'?'Bỏ qua chữ':'Không nhớ chữ này'}</button></div></div>`}
+   <div id="sres"></div>`;
+  $('#sback').onclick=()=>{ WW=null; WR.set.tab='sent'; go('viet'); };
+  $('#ssay').onclick=()=>playRef(s.zh);
+  const pk=$('#speek'); if(pk) pk.onclick=()=>{ T.peek=true; render(); };
+  if(T.done) return sentShowResult();
+  if(T.k===0&&!T.res.length&&mode!=='copy') playRef(s.zh);
+  const cfg=mode==='copy'?{showOutline:true,showHintAfterMisses:1}:{showOutline:false,showHintAfterMisses:3};
+  const w=wMount(cur.ch,Object.assign({showCharacter:false},cfg)); const fb=$('#wfb');
+  if(!w){ fb.textContent='Không tải được nét của chữ này.'; return; }
+  let miss=0, ended=false;
+  const next=(skip)=>{ if(ended) return; ended=true; T.res.push({c:cur.ch,m:skip?99:miss,skip:!!skip,dup:cur.dup});
+    const go2=()=>{ T.k++; if(T.k>=N){ T.done=true; T.sc=sentRecord(T); } render(); };
+    if(skip){ try{ w.cancelQuiz(); }catch(e){} w.showCharacter(); fb.innerHTML=`Chữ đúng: <b style="font-family:'Noto Serif SC',serif;font-size:1.2rem">${esc(cur.ch)}</b>`; setTimeout(go2,1100); }
+    else setTimeout(go2,miss?650:350); };
+  w.quiz({onMistake:st=>{ miss++; fb.innerHTML=`<span style="color:var(--bad)">Sai nét ${st.strokeNum+1}</span> · ${miss} lỗi`; },
+    onCorrectStroke:st=>{ fb.innerHTML=`<span style="color:var(--jade)">✓ nét ${st.strokeNum+1}</span>${miss?` · ${miss} lỗi`:''}`; },
+    onComplete:()=>next(false)});
+  $('#sskip').onclick=()=>next(true);
+}
+function sentShowResult(){
+  const Q=SUB.sent, T=Q.cur, bad=[...new Set(T.res.filter(r=>r.skip||r.m>=3).map(r=>r.c))];
+  const nextMode=T.mode==='copy'?'dict':T.mode==='dict'?'tran':null;
+  $('#sres').innerHTML=`<div class="card" style="text-align:center;padding:16px">
+    <div style="font-size:2.2rem;font-weight:700">${Math.round(T.sc*100)}%</div>
+    <p class="small muted" style="margin:2px 0 8px">${T.res.filter(r=>r.m<=2&&!r.skip).length}/${T.res.length} chữ viết đạt (sai ≤ 2 nét)${T.mode!=='copy'?' · chữ đến hạn ôn viết đã được tính lượt ôn':''}</p>
+    ${bad.length?`<p class="small">Chữ cần luyện thêm: <span style="font-family:'Noto Serif SC',serif;font-size:1.3rem;color:var(--bad)">${bad.map(esc).join(' ')}</span></p>`:''}
+    <div class="row" style="justify-content:center;gap:8px;flex-wrap:wrap">
+     <button class="btn pri" id="snext">${Q.i<Q.q.length-1?'Câu tiếp':'Xong'} <small style="opacity:.7">(Enter)</small></button>
+     <button class="btn" id="sagain">Viết lại</button>
+     ${nextMode&&T.sc>=.8?`<button class="btn" id="sup">Thử ${SMODES[nextMode].n}</button>`:''}
+     ${bad.length?`<button class="btn" id="sbad">Luyện riêng chữ sai</button>`:''}</div></div>`;
+  $('#snext').onclick=()=>{ Q.i++; Q.cur=null; render(); window.scrollTo(0,0); };
+  $('#sagain').onclick=()=>{ Q.cur=null; render(); };
+  const up=$('#sup'); if(up) up.onclick=()=>{ Q.mode=nextMode; Q.cur=null; render(); };
+  const sb=$('#sbad'); if(sb) sb.onclick=()=>wStartLearn(bad.join(''));
+  setTimeout(()=>{ const b=$('#snext'); if(b) b.focus({preventScroll:true}); },50);
+}
+function renderSentDone(){
+  const Q=SUB.sent, S=WR.sent||{}, rows=Q.q.map(s=>({s,r:S[s.zh]}));
+  V.innerHTML=`<div class="card" style="text-align:center;padding:20px 14px"><div class="small muted">Viết câu · ${SMODES[Q.mode].n}</div><div style="font-size:2rem;font-weight:700;margin:6px 0">${Q.q.length} câu</div>
+    <div class="list" style="text-align:left;margin-top:8px">${rows.map(({s,r})=>`<div class="item"><div><div style="font-family:'Noto Serif SC',serif">${esc(s.zh)}</div><div class="small muted">${esc(s.vi)}</div></div><b class="small">${r?Math.round(r.best*100)+'%':''}</b></div>`).join('')}</div>
+    <div class="row" style="justify-content:center;gap:8px;margin-top:12px"><button class="btn pri" id="smore">Viết 5 câu nữa</button><button class="btn" id="slist">Về danh sách</button></div></div>`;
+  $('#smore').onclick=()=>sentStart(sentPick(5)); $('#slist').onclick=()=>{ WR.set.tab='sent'; go('viet'); };
+}
+document.addEventListener('click',e=>{ const b=e.target.closest&&e.target.closest('[data-ws]'); if(!b) return; e.preventDefault(); wOpenSent(b.dataset.ws); });
 
 /* Tiến bộ */
 function weakList(n){ return Object.entries(ST.weak).filter(([k,w])=>w.n>=2&&w.bad>0).map(([k,w])=>({key:k,rate:w.bad/w.n,...w})).sort((a,b)=>b.rate-a.rate||b.bad-a.bad).slice(0,n); }
@@ -794,7 +916,9 @@ function importExtra(d){ // gộp phần mở rộng: lấy bản có nhiều l�
   if(d._path){ const P=d._path; for(const k in (P.passed||{})){ const a=P.passed[k], l=PT.passed[k]; if(!l||(a.best||0)>(l.best||0)) PT.passed[k]=a; }
     PT.gram=PT.gram||{}; for(const k in (P.gram||{})){ const a=P.gram[k], l=PT.gram[k]; if(!l||(a.best||0)>(l.best||0)) PT.gram[k]=a; } pSave(); }
   if(d._write){ const W=wMigrate(JSON.parse(JSON.stringify(d._write))); for(const c in W.writing){ const a=W.writing[c], l=WR.writing[c]; if(!l||(a.n||0)>(l.n||0)) WR.writing[c]=a; }
-    const seen=new Set(WR.hist.map(x=>x.t+x.c)); W.hist.forEach(x=>{ if(!seen.has(x.t+x.c)) WR.hist.push(x); }); WR.hist.sort((a,b)=>a.t-b.t); wSave(); }
+    const seen=new Set(WR.hist.map(x=>x.t+x.c)); W.hist.forEach(x=>{ if(!seen.has(x.t+x.c)) WR.hist.push(x); }); WR.hist.sort((a,b)=>a.t-b.t);
+    for(const z in W.sent){ const a=W.sent[z], l=WR.sent[z]; if(!l||(a.n||0)>(l.n||0)) WR.sent[z]=a; }
+    const ss=new Set(WR.shist.map(x=>x.t+x.s)); W.shist.forEach(x=>{ if(!ss.has(x.t+x.s)) WR.shist.push(x); }); WR.shist.sort((a,b)=>a.t-b.t); wSave(); }
 }
 function copyText(t){ (navigator.clipboard?navigator.clipboard.writeText(t):Promise.reject()).then(()=>toast('Đã chép. Mở Claude và dán vào khung chat.'),()=>{ const a=document.createElement('textarea'); a.value=t; document.body.appendChild(a); a.select(); try{ document.execCommand('copy'); toast('Đã chép.'); }catch(e){ toast('Không chép được.'); } a.remove(); }); }
 /* Cài đặt */
@@ -822,7 +946,7 @@ function renderSettings(){
     <div class="row"><button class="btn" id="sv">Lưu</button><button class="btn" id="exp">Xuất tiến độ</button><label class="btn" style="cursor:pointer">Nhập tiến độ<input type="file" id="imp" accept=".json" hidden></label></div>
     <div class="field">Đồng bộ từ Sổ Từ HSK: dán đoạn đã sao chép từ mục “Xuất tiến trình sang ứng dụng Luyện nói”<textarea id="swin" placeholder="Dán đoạn JSON vào đây" style="min-height:90px;font-size:.8rem"></textarea></div>
     <div class="row"><button class="btn" id="swgo">Nhập tiến trình từ Sổ Từ HSK</button></div>
-    <p class="note">Tiến độ lưu trong trình duyệt của máy này. Dùng Xuất/Nhập để chuyển sang máy khác. Phiên bản ứng dụng: v16.</p>
+    <p class="note">Tiến độ lưu trong trình duyệt của máy này. Dùng Xuất/Nhập để chuyển sang máy khác. Phiên bản ứng dụng: v17.</p>
    </div>`;
   $('#test').onclick=async()=>{ ST.az.key=$('#k').value.trim(); ST.az.region=$('#rg').value; ST.az.ok=false; save(); const tr=$('#tr');
     if(!ST.az.key){ tr.textContent='Chưa nhập key.'; render(); return; }
@@ -1006,7 +1130,7 @@ function srsDeckCard(){
         <div class="row" style="justify-content:space-between"><div><div style="font-size:1.25rem;color:var(--jade);font-weight:600">${esc(w.py)}</div><div style="font-size:1.1rem;font-weight:600">${esc(w.vi)}</div></div><span style="font-size:2rem">${esc(w.em||'')}</span></div>
         ${w.ex?`<div style="background:var(--sunk);border-radius:10px;padding:10px 12px"><div style="font-family:'Noto Serif SC',serif;font-size:1.15rem;line-height:1.9">${segHTML(w.ex)}</div><div id="tok-info"></div><div class="small" style="color:var(--jade)">${esc(w.exp||'')}</div><div class="small muted">${esc(w.exv||'')}</div></div>`:''}
         ${hanInfoHTML(w.hz)}
-        <div class="row" style="justify-content:center"><button class="btn sm" id="srs-play">🔊 Nghe giọng mẫu</button><button class="btn sm" id="srs-strk">✍ Thứ tự nét</button><button class="btn sm" data-wr="${esc(w.hz)}">🖌 Luyện viết chữ này</button></div>
+        <div class="row" style="justify-content:center"><button class="btn sm" id="srs-play">🔊 Nghe giọng mẫu</button><button class="btn sm" id="srs-strk">✍ Thứ tự nét</button><button class="btn sm" data-wr="${esc(w.hz)}">🖌 Luyện viết chữ này</button>${w.ex?`<button class="btn sm" data-ws="${esc(w.ex)}">🖌 Viết câu ví dụ</button>`:''}</div>
         <div id="srs-strokes"></div>
         <div class="grades" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">${grades}</div></div>`
       :`<div style="padding:0 14px 14px"><button class="btn pri" id="srs-show" style="width:100%">Hiện đáp án <small style="opacity:.7">(Space / Enter)</small></button></div>`}
