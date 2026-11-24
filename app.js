@@ -352,7 +352,7 @@ function renderSummary(){
 }
 /* Luyện từ & câu */
 function renderLesson(){
-  const les=SUB.lesson, rows=[]; les.items.forEach((it,i)=>{ rows.push({i,kind:'w',zh:it.hz,py:it.py,vi:it.vi,t:it.tw}); if(it.ex) rows.push({i,kind:'e',zh:it.ex,py:it.exp,vi:it.exv,t:it.te}); });
+  const les=SUB.lesson, rows=[]; les.items.forEach((it,i)=>{ rows.push({i,kind:'w',zh:it.hz,py:it.py,vi:it.vi,t:it.tw,ex:it.ex,exp:it.exp,exv:it.exv}); if(it.ex) rows.push({i,kind:'e',zh:it.ex,py:it.exp,vi:it.exv,t:it.te}); });
   SUB.rows=rows;
   V.innerHTML=`<div class="row" style="justify-content:space-between"><h2>Bài ${les.k} · ${esc(les.title)}</h2><button class="btn sm" id="back">← Danh sách bài</button></div>
    <div class="acts" style="justify-content:flex-start;margin:8px 0"><button class="btn pri" id="start">Luyện lần lượt từ đầu</button></div>
@@ -365,13 +365,13 @@ function renderDrill(){
   const r=SUB.rows[SUB.item], n=SUB.rows.length;
   V.innerHTML=`<div class="row" style="justify-content:space-between"><div class="muted small">Bài ${SUB.lesson.k} · ${SUB.item+1}/${n} · ${r.kind==='w'?'Từ':'Câu ví dụ'}</div><button class="btn sm" id="back">← Bài học</button></div>
    <div class="card" id="prac" style="margin-top:8px">${practiceHTML(r)}</div>
-   ${r.kind==='w'&&hanInfoHTML(r.zh)?`<div class="card" style="margin-top:8px"><div class="small muted" style="font-weight:600;margin-bottom:6px">🧩 Nhớ chữ theo bộ thủ</div>${hanInfoHTML(r.zh)}<div class="row" style="justify-content:center;flex-wrap:wrap;margin-top:8px"><button class="btn sm" id="drill-strk">✍ Nét chữ · Xem lại · Tập viết</button><button class="btn sm" data-wr="${esc(r.zh)}">🖌 Luyện viết chữ này</button></div><div id="srs-strokes"></div></div>`:''}
+   ${r.kind==='w'?`<div class="card" style="margin-top:8px">${studyHTML(r.zh,r.ex?{zh:r.ex,exp:r.exp,exv:r.exv}:null)}<div class="row" style="justify-content:center;flex-wrap:wrap;margin-top:12px"><button class="btn sm" data-wr="${esc(r.zh)}">🖌 Luyện viết chữ này</button>${r.ex?`<button class="btn sm" data-ws="${esc(r.ex)}">🖌 Viết câu ví dụ</button>`:''}</div></div>`:''}
    <div class="acts" style="margin-top:10px"><button class="btn" id="prev" ${SUB.item?'':'disabled'}>← Trước</button><button class="btn pri" id="next">${SUB.item<n-1?'Tiếp →':'Xong bài'}</button></div>`;
   $('#back').onclick=()=>{ SUB.item=null; CUR=null; micUI(false); render(); };
   $('#prev').onclick=()=>{ SUB.item--; render(); };
   $('#next').onclick=()=>{ if(SUB.item<n-1){ SUB.item++; render(); } else { SUB.item=null; CUR=null; micUI(false); render(); toast('Đã xong bài!'); } };
   bindPractice($('#prac'),r); playRef(r.zh);
-  const dk=$('#drill-strk'); if(dk) dk.onclick=()=>showStrokes(r.zh);
+  if(r.kind==='w'){ bindStudy(r.zh,r.ex?{zh:r.ex}:null); ensureWD(()=>{ if(view==='luyen'&&SUB&&SUB.item!=null) render(); }); }
 }
 /* ---------- Lộ trình HSK theo bài + bài kiểm tra (theo Sổ Từ HSK) ---------- */
 const PKEY='luyennoi-path-v1', PASS=.9;
@@ -993,6 +993,39 @@ document.addEventListener('keydown',e=>{
 document.addEventListener('visibilitychange',()=>{ if(document.hidden&&!REC.on) micClose(); });
 
 /* ---------- Hán Việt, bộ thủ, thứ tự nét ---------- */
+/* ---------- Bảng học chữ theo mẫu Sổ Từ HSK: câu ví dụ, thứ tự viết, bộ thủ + Hán Việt + cách nhớ ---------- */
+const capF=s=>{ s=String(s||''); return s.charAt(0).toUpperCase()+s.slice(1); };
+function ensureWD(fn){ if(!WD) loadWD().then(fn).catch(()=>{}); }
+function radCardHTML(c){
+  const D=WD||{}, d=D[c]; if(!d) return '';
+  const parts=String(d.comp||'').split('+').map(p=>{ const m=p.trim().match(/^(\S)\s*(.*)$/u); return m?{ch:m[1],mean:m[2]}:null; }).filter(Boolean);
+  const chip=(ch,label,mean,red)=>`<div style="display:flex;align-items:center;gap:8px;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:5px 9px"><b style="font-family:'Noto Serif SC',serif;font-size:1.35rem;line-height:1;${red?'color:var(--seal)':''}">${esc(ch)}</b><span class="small"><b style="${red?'color:var(--seal)':''}">${esc(label)}</b>${mean?`: ${esc(mean)}`:''}</span></div>`;
+  const rows=[];
+  if(d.rad) rows.push(chip(d.rad,'bộ '+capF(d.rn),d.rv,true));
+  parts.filter(p=>p.ch!==d.rad).forEach(p=>{ const e=D[p.ch]; rows.push(chip(p.ch,e?'chữ '+capF(String(e.hv).toLowerCase()):'thành phần',p.mean,false)); });
+  return `<div style="display:flex;gap:12px;align-items:flex-start;border:1px solid var(--line);border-radius:12px;padding:10px 12px;background:var(--sunk)">
+    <div style="font-family:'Noto Serif SC',serif;font-size:2.6rem;line-height:1">${esc(c)}</div>
+    <div style="display:flex;flex-direction:column;gap:6px;flex:1;min-width:0">
+      <div><b style="color:var(--seal);letter-spacing:.06em">${esc(d.hv)}</b> <span class="small" style="color:var(--jade)">${esc(d.py)}</span> <span class="small muted">· ${esc(d.vi)}</span></div>
+      ${rows.map((r,k)=>(k?'<span class="small muted" style="margin:-3px 0 -3px 4px">+</span>':'')+r).join('')}
+      <div class="small muted">Cấu trúc: ${esc(d.st||'')} · ${d.n} nét</div>
+      ${d.mn?`<div class="small"><b>Cách nhớ:</b> ${esc(d.mn)}</div>`:''}
+    </div></div>`;
+}
+function studyHTML(hz,ex){
+  const cs=[...new Set([...hz].filter(c=>HANRE.test(c)))];
+  const lab=t=>`<div class="small muted" style="font-weight:700;letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px">${t}</div>`;
+  const exH=ex&&ex.zh?`<div>${lab('Câu ví dụ')}<div style="background:var(--sunk);border-radius:10px;padding:10px 12px"><div class="row" style="justify-content:space-between;align-items:flex-start;flex-wrap:nowrap"><div style="font-family:'Noto Serif SC',serif;font-size:1.25rem;line-height:1.9">${segHTML(ex.zh)}</div><button class="btn sm" id="stu-exs" title="Nghe câu ví dụ (E)">🔊</button></div><div id="tok-info"></div><div class="small" style="color:var(--jade)">${esc(ex.exp||'')}</div><div class="small muted">${esc(ex.exv||'')}</div></div></div>`:'';
+  const radH=WD?cs.map(radCardHTML).join(''):'<p class="small muted"><span class="spin"></span> Đang tải bộ thủ…</p>';
+  return `<div style="display:flex;flex-direction:column;gap:14px">${exH}
+    <div>${lab('Thứ tự viết')}<div id="stu-strokes"></div><div class="small muted" style="margin-top:4px">Nét đỏ là bộ thủ.</div></div>
+    <div>${lab('Nhớ chữ theo bộ thủ')}<div class="small muted" style="margin-bottom:6px"><b style="color:var(--seal)">bộ</b> = một trong 214 bộ thủ · <b>chữ</b> = thành phần là một chữ riêng, thường gợi âm</div><div style="display:flex;flex-direction:column;gap:8px">${radH}</div></div></div>`;
+}
+function bindStudy(hz,ex){
+  bindTokens();
+  const b=$('#stu-exs'); if(b) b.onclick=()=>{ if(ex&&ex.zh) playRef(ex.zh); };
+  if($('#stu-strokes')) showStrokes(hz,'#stu-strokes',true);
+}
 function hanInfoHTML(hz){
   const cs=[...new Set([...hz].filter(c=>HZD[c]))];
   if(!cs.length) return '';
@@ -1001,12 +1034,12 @@ function hanInfoHTML(hz){
 /* ---------- Thứ tự nét: dùng HanziWriter như artifact Sổ Từ HSK ---------- */
 let HWP=null;
 function loadHW(){ if(window.HanziWriter) return Promise.resolve(); if(!HWP) HWP=new Promise((res,rej)=>{ const s=document.createElement('script'); s.src='lib/hanzi-writer.min.js'; s.onload=()=>res(); s.onerror=()=>{ const s2=document.createElement('script'); s2.src='https://cdn.jsdelivr.net/npm/hanzi-writer@3.7.2/dist/hanzi-writer.min.js'; s2.onload=()=>res(); s2.onerror=()=>{ HWP=null; rej(new Error('hw')); }; document.head.appendChild(s2); }; document.head.appendChild(s); }); return HWP; }
-async function showStrokes(hz){
-  const box=$('#srs-strokes'); if(!box) return;
-  if(box.dataset.open===hz){ box.innerHTML=''; box.dataset.open=''; return; }
+async function showStrokes(hz,sel='#srs-strokes',force=false){
+  const box=$(sel); if(!box) return;
+  if(!force&&box.dataset.open===hz){ box.innerHTML=''; box.dataset.open=''; return; }
   box.dataset.open=hz; box.innerHTML='<p class="muted small"><span class="spin"></span> Đang tải thứ tự nét…</p>';
   let D, ok=true; try{ [D]=await Promise.all([loadStrokes(),loadHW()]); }catch(e){ box.innerHTML='<p class="small muted">Không tải được dữ liệu nét (cần mạng). Thử lại sau.</p>'; return; }
-  if(box.dataset.open!==hz) return;
+  if(!box.isConnected||box.dataset.open!==hz) return;
   const cs=[...new Set([...hz].filter(c=>HANRE.test(c)))].filter(c=>D[c]);
   if(!cs.length){ box.innerHTML='<p class="small muted">Chưa có dữ liệu nét cho các chữ này.</p>'; return; }
   box.innerHTML=`<div style="display:flex;flex-wrap:wrap;gap:12px;justify-content:center;margin-top:8px">${cs.map((c,k)=>`<div style="display:flex;flex-direction:column;align-items:center;gap:6px"><div data-ch="${esc(c)}" style="width:150px;height:150px;border:1px solid var(--line);border-radius:10px;background:var(--surface)"></div><span class="small muted">${esc(c)} · ${D[c].strokes.length} nét</span></div>`).join('')}</div>
@@ -1020,8 +1053,8 @@ async function showStrokes(hz){
   let run=0;
   const play=()=>{ const id=++run; let i=0; ws.forEach(x=>x.hideCharacter());
     const next=()=>{ if(id!==run||i>=ws.length) return; ws[i++].animateCharacter({onComplete:()=>setTimeout(next,250)}); }; next(); };
-  $('#sw-play').onclick=play;
-  const qb=$('#sw-quiz'); let quizzing=false, left=0, miss=0;
+  box.querySelector('#sw-play').onclick=play;
+  const qb=box.querySelector('#sw-quiz'); let quizzing=false, left=0, miss=0;
   const stopQuiz=()=>{ quizzing=false; qb.setAttribute('aria-pressed','false'); ws.forEach(x=>{ try{ x.cancelQuiz(); }catch(e){} }); };
   qb.onclick=()=>{ if(quizzing){ stopQuiz(); return; } quizzing=true; qb.setAttribute('aria-pressed','true'); left=ws.length; miss=0; run++;
     ws.forEach(x=>{ x.hideCharacter(); x.quiz({onMistake:()=>miss++, onComplete:()=>{ if(--left===0){ quizzing=false; qb.setAttribute('aria-pressed','false'); toast(miss?`Viết xong, sai ${miss} nét. Bấm Tập viết để thử lại.`:'Viết đúng toàn bộ nét!'); } }}); });
@@ -1139,11 +1172,9 @@ function srsDeckCard(){
     const grades=[[0,'Lại'],[1,'Khó'],[2,'Tốt'],[3,'Dễ']].map(([g,label])=>`<button class="btn ${g===2?'pri':''}" data-g="${g}" style="flex-direction:column;gap:2px;padding:8px 4px"><small style="opacity:.7">${g+1}</small><b>${label}</b><span class="small" style="font-weight:400;opacity:.85">${srsNext(c,g,now)}</span></button>`).join('');
     const body=`<div style="border-top:1px dashed var(--line);padding:14px;display:flex;flex-direction:column;gap:12px">
         <div class="row" style="justify-content:center;gap:12px;flex-wrap:wrap">${hvTag(w.hz)}</div>
-        ${w.ex?`<div style="background:var(--sunk);border-radius:10px;padding:10px 12px"><div class="row" style="justify-content:space-between;align-items:flex-start"><div style="font-family:'Noto Serif SC',serif;font-size:1.15rem;line-height:1.9">${segHTML(w.ex)}</div><button class="btn sm" id="srs-exs" title="Nghe câu ví dụ (E)">🔊 Câu mẫu</button></div><div id="tok-info"></div><div class="small" style="color:var(--jade)">${esc(w.exp||'')}</div><div class="small muted">${esc(w.exv||'')}</div></div>`:''}
         <div id="srs-prac">${practiceHTML(srsTg(w),{noText:true})}</div>
-        <div><div class="small muted" style="font-weight:600;margin-bottom:6px">🧩 Nhớ chữ theo bộ thủ</div>${hanInfoHTML(w.hz)}</div>
-        <div class="row" style="justify-content:center;flex-wrap:wrap"><button class="btn sm" id="srs-strk">✍ Nét chữ · Xem lại · Tập viết</button><button class="btn sm" data-wr="${esc(w.hz)}">🖌 Luyện viết chữ này</button>${w.ex?`<button class="btn sm" data-ws="${esc(w.ex)}">🖌 Viết câu ví dụ</button>`:''}</div>
-        <div id="srs-strokes"></div>
+        ${studyHTML(w.hz,w.ex?{zh:w.ex,exp:w.exp,exv:w.exv}:null)}
+        <div class="row" style="justify-content:center;flex-wrap:wrap"><button class="btn sm" data-wr="${esc(w.hz)}">🖌 Luyện viết chữ này</button>${w.ex?`<button class="btn sm" data-ws="${esc(w.ex)}">🖌 Viết câu ví dụ</button>`:''}</div>
         <div class="grades" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">${grades}</div></div>`;
     card=`<div class="card" style="padding:0;overflow:hidden">
       <div style="display:flex;justify-content:space-between;padding:10px 14px" class="small muted"><span>${esc(w.title)} · Bài ${w.lesson} · HSK ${w.lv}</span><span>${stage}</span></div>
@@ -1168,8 +1199,7 @@ function renderSRS(){
   if(w&&SR.shown){ const p=$('#srs-prac'); if(p) bindPractice(p,srsTg(w)); }
   else { CUR=null; micUI(false); }
   const sh=$('#srs-show'); if(sh) sh.onclick=()=>{ SR.shown=true; renderSRS(); if(SR.cur) playRef(SR.cur.hz); };
-  const sk=$('#srs-strk'); if(sk) sk.onclick=()=>showStrokes(SR.cur.hz);
-  const ex=$('#srs-exs'); if(ex) ex.onclick=()=>{ if(SR.cur&&SR.cur.ex) playRef(SR.cur.ex); };
+  if(w&&SR.shown){ bindStudy(w.hz,w.ex?{zh:w.ex}:null); ensureWD(()=>{ if(view==='on-tu'&&!SUB) renderSRS(); }); }
   V.querySelectorAll('[data-g]').forEach(b=>b.onclick=()=>srsGrade(+b.dataset.g));
 }
 
