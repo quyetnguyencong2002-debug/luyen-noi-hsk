@@ -204,7 +204,7 @@ function micLabel(t){ const l=$('#micl'); if(l) l.textContent=t; }
 function practiceHTML(tg,opt={}){
   const cs=chars(tg.zh), size=cs.length<=2?'big':cs.length>8?'sm':'';
   return `<div class="target"><div class="cells ${size}" id="cells">${cs.map((c,k)=>`<button class="cell" data-k="${k}"><span class="g">${esc(c)}</span><span class="s"></span></button>`).join('')}</div>
-    <div class="tpy">${esc(tg.py)}</div><div class="tvi">${esc(tg.vi)}</div>
+    ${opt.noText?'':`<div class="tpy">${esc(tg.py)}</div><div class="tvi">${esc(tg.vi)}</div>`}
     <div class="acts"><button class="btn sm" id="pref">${SPK} Nghe mẫu</button><button class="btn sm" id="pslow">Nghe chậm</button><button class="btn sm" id="pme" hidden>${ME} Nghe lại tôi</button></div></div>
     <div id="pres"></div>`;
 }
@@ -365,11 +365,13 @@ function renderDrill(){
   const r=SUB.rows[SUB.item], n=SUB.rows.length;
   V.innerHTML=`<div class="row" style="justify-content:space-between"><div class="muted small">Bài ${SUB.lesson.k} · ${SUB.item+1}/${n} · ${r.kind==='w'?'Từ':'Câu ví dụ'}</div><button class="btn sm" id="back">← Bài học</button></div>
    <div class="card" id="prac" style="margin-top:8px">${practiceHTML(r)}</div>
+   ${r.kind==='w'&&hanInfoHTML(r.zh)?`<div class="card" style="margin-top:8px"><div class="small muted" style="font-weight:600;margin-bottom:6px">🧩 Nhớ chữ theo bộ thủ</div>${hanInfoHTML(r.zh)}<div class="row" style="justify-content:center;flex-wrap:wrap;margin-top:8px"><button class="btn sm" id="drill-strk">✍ Nét chữ · Xem lại · Tập viết</button><button class="btn sm" data-wr="${esc(r.zh)}">🖌 Luyện viết chữ này</button></div><div id="srs-strokes"></div></div>`:''}
    <div class="acts" style="margin-top:10px"><button class="btn" id="prev" ${SUB.item?'':'disabled'}>← Trước</button><button class="btn pri" id="next">${SUB.item<n-1?'Tiếp →':'Xong bài'}</button></div>`;
   $('#back').onclick=()=>{ SUB.item=null; CUR=null; micUI(false); render(); };
   $('#prev').onclick=()=>{ SUB.item--; render(); };
   $('#next').onclick=()=>{ if(SUB.item<n-1){ SUB.item++; render(); } else { SUB.item=null; CUR=null; micUI(false); render(); toast('Đã xong bài!'); } };
   bindPractice($('#prac'),r); playRef(r.zh);
+  const dk=$('#drill-strk'); if(dk) dk.onclick=()=>showStrokes(r.zh);
 }
 /* ---------- Lộ trình HSK theo bài + bài kiểm tra (theo Sổ Từ HSK) ---------- */
 const PKEY='luyennoi-path-v1', PASS=.9;
@@ -981,8 +983,12 @@ document.addEventListener('keydown',e=>{
   if(view!=='on-tu'||SUB) return;
   const t=e.target; if(t&&(/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)||t.isContentEditable)) return;
   if(!SR.cur) return;
+  if(e.key==='z'||e.key==='Z'){ if(SR.undo){ e.preventDefault(); srsUndo(); } return; }
   if(!SR.shown){ if(e.key===' '||e.key==='Enter'){ e.preventDefault(); SR.shown=true; renderSRS(); if(SR.cur) playRef(SR.cur.hz); } return; }
-  if(['1','2','3','4'].includes(e.key)){ e.preventDefault(); srsGrade(+e.key-1); }
+  if(['1','2','3','4'].includes(e.key)){ e.preventDefault(); srsGrade(+e.key-1); return; }
+  const k=e.key.toLowerCase();
+  if(k==='s'){ e.preventDefault(); playRef(SR.cur.hz); }
+  else if(k==='e'&&SR.cur.ex){ e.preventDefault(); playRef(SR.cur.ex); }
 });
 document.addEventListener('visibilitychange',()=>{ if(document.hidden&&!REC.on) micClose(); });
 
@@ -1004,7 +1010,7 @@ async function showStrokes(hz){
   const cs=[...new Set([...hz].filter(c=>HANRE.test(c)))].filter(c=>D[c]);
   if(!cs.length){ box.innerHTML='<p class="small muted">Chưa có dữ liệu nét cho các chữ này.</p>'; return; }
   box.innerHTML=`<div style="display:flex;flex-wrap:wrap;gap:12px;justify-content:center;margin-top:8px">${cs.map((c,k)=>`<div style="display:flex;flex-direction:column;align-items:center;gap:6px"><div data-ch="${esc(c)}" style="width:150px;height:150px;border:1px solid var(--line);border-radius:10px;background:var(--surface)"></div><span class="small muted">${esc(c)} · ${D[c].strokes.length} nét</span></div>`).join('')}</div>
-    <div class="row" style="justify-content:center;margin-top:8px"><button class="btn sm" id="sw-play">▶ Xem lại nét</button><button class="btn sm" id="sw-quiz" aria-pressed="false">✍ Tập viết</button></div>`;
+    <div class="row" style="justify-content:center;margin-top:8px"><button class="btn sm" id="sw-play">▶ Xem lại</button><button class="btn sm" id="sw-quiz" aria-pressed="false">✍ Tập viết</button></div>`;
   const tok=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
   const opts={width:150,height:150,padding:8,showCharacter:false,showOutline:true,strokeAnimationSpeed:1.1,delayBetweenStrokes:180,
     strokeColor:tok('--ink'),radicalColor:tok('--seal'),outlineColor:tok('--line'),highlightColor:tok('--jade'),drawingColor:tok('--jade'),drawingWidth:5,showHintAfterMisses:2,
@@ -1068,7 +1074,7 @@ function srsSave(){ try{ localStorage.setItem(SRSKEY,JSON.stringify({c:SR.c,day:
 const MINS=6e4, DAYS=864e5, STEPS=[1,10], RELEARN=10, GRAD=1, EASY_GRAD=4, START_EF=2.5, MIN_EF=1.3, MATURE=21;
 const todayN=()=>Math.floor((Date.now()-new Date().getTimezoneOffset()*MINS)/DAYS);
 function dayS(){ const t=todayN(); if(!SR.day||SR.day.d!==t) SR.day={d:t,n:0,r:0}; return SR.day; }
-function allWords(){ const out=[]; if(!HSK) return out; for(const L of HSK) for(const les of L.lessons) for(const it of les.items){ out.push({id:it.hz,hz:it.hz,py:it.py,vi:it.vi,em:it.em,ex:it.ex,exp:it.exp,exv:it.exv,lv:L.lv,lesson:les.k,title:les.title}); } return out; }
+function allWords(){ const out=[]; if(!HSK) return out; for(const L of HSK) for(const les of L.lessons) for(const it of les.items){ out.push({id:it.hz,hz:it.hz,py:it.py,vi:it.vi,em:it.em,ex:it.ex,exp:it.exp,exv:it.exv,tw:it.tw,te:it.te,lv:L.lv,lesson:les.k,title:les.title}); } return out; }
 function srsSchedule(c0,g,now){
   const t=todayN(); const c=c0?{...c0}:{q:'new',st:0,iv:0,ef:START_EF,r:0,l:0};
   if(c.q==='new'||c.q==='learn'){
@@ -1105,10 +1111,18 @@ function srsPick(){
 }
 function srsGrade(g){
   const w=SR.cur; if(!w||!SR.shown) return;
-  const d=dayS(); if(!SR.c[w.id]) d.n++; d.r++;
+  const d=dayS(); SR.undo={w, id:w.id, had:!!SR.c[w.id], prev:SR.c[w.id]?{...SR.c[w.id]}:null, day:{...d}};
+  if(!SR.c[w.id]) d.n++; d.r++;
   SR.c[w.id]=srsSchedule(SR.c[w.id],g,Date.now()); srsSave();
   SR.shown=false; SR.cur=srsPick(); renderSRS();
 }
+function srsUndo(){
+  const u=SR.undo; if(!u) return;
+  if(u.had) SR.c[u.id]=u.prev; else delete SR.c[u.id];
+  SR.day=u.day; SR.cur=u.w; SR.shown=true; SR.undo=null; srsSave(); renderSRS(); toast('Đã hoàn tác');
+}
+function hvTag(hz){ const hv=[...hz].filter(c=>HZD[c]).map(c=>HZD[c].hv).join(' · '); return hv?`<span style="color:var(--seal);font-weight:700;letter-spacing:.08em">${esc(hv)}</span>`:''; }
+function srsTg(w){ return {zh:w.hz,py:w.py,vi:w.vi,t:w.tw||[]}; }
 function srsDeckCard(){
   if(!HSK) return '<p class="muted"><span class="spin"></span> Đang tải dữ liệu…</p>';
   const b=srsBuckets(), d=dayS(), mature=Object.values(SR.c).filter(c=>c.q==='review'&&c.iv>=MATURE).length;
@@ -1122,18 +1136,21 @@ function srsDeckCard(){
   } else {
     const c=SR.c[w.id], stage=!c?'Từ mới':c.q==='review'?(c.iv>=MATURE?'Đã thuộc':'Đang nhớ'):'Đang học';
     const now=Date.now();
-    const grades=[[0,'Lại','Lại'],[1,'Khó','Khó'],[2,'Được','Được'],[3,'Dễ','Dễ']].map(([g,label])=>`<button class="btn ${g===2?'pri':''}" data-g="${g}" style="flex-direction:column;gap:2px;padding:8px 4px"><small style="opacity:.7">${g+1}</small><b>${label}</b><span class="small" style="font-weight:400;opacity:.85">${srsNext(c,g,now)}</span></button>`).join('');
+    const grades=[[0,'Lại'],[1,'Khó'],[2,'Tốt'],[3,'Dễ']].map(([g,label])=>`<button class="btn ${g===2?'pri':''}" data-g="${g}" style="flex-direction:column;gap:2px;padding:8px 4px"><small style="opacity:.7">${g+1}</small><b>${label}</b><span class="small" style="font-weight:400;opacity:.85">${srsNext(c,g,now)}</span></button>`).join('');
+    const body=`<div style="border-top:1px dashed var(--line);padding:14px;display:flex;flex-direction:column;gap:12px">
+        <div class="row" style="justify-content:center;gap:12px;flex-wrap:wrap">${hvTag(w.hz)}</div>
+        ${w.ex?`<div style="background:var(--sunk);border-radius:10px;padding:10px 12px"><div class="row" style="justify-content:space-between;align-items:flex-start"><div style="font-family:'Noto Serif SC',serif;font-size:1.15rem;line-height:1.9">${segHTML(w.ex)}</div><button class="btn sm" id="srs-exs" title="Nghe câu ví dụ (E)">🔊 Câu mẫu</button></div><div id="tok-info"></div><div class="small" style="color:var(--jade)">${esc(w.exp||'')}</div><div class="small muted">${esc(w.exv||'')}</div></div>`:''}
+        <div id="srs-prac">${practiceHTML(srsTg(w),{noText:true})}</div>
+        <div><div class="small muted" style="font-weight:600;margin-bottom:6px">🧩 Nhớ chữ theo bộ thủ</div>${hanInfoHTML(w.hz)}</div>
+        <div class="row" style="justify-content:center;flex-wrap:wrap"><button class="btn sm" id="srs-strk">✍ Nét chữ · Xem lại · Tập viết</button><button class="btn sm" data-wr="${esc(w.hz)}">🖌 Luyện viết chữ này</button>${w.ex?`<button class="btn sm" data-ws="${esc(w.ex)}">🖌 Viết câu ví dụ</button>`:''}</div>
+        <div id="srs-strokes"></div>
+        <div class="grades" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">${grades}</div></div>`;
     card=`<div class="card" style="padding:0;overflow:hidden">
       <div style="display:flex;justify-content:space-between;padding:10px 14px" class="small muted"><span>${esc(w.title)} · Bài ${w.lesson} · HSK ${w.lv}</span><span>${stage}</span></div>
-      <div style="text-align:center;padding:18px 14px 12px"><div style="font-size:4.2rem;line-height:1.1;font-family:'Noto Serif SC',serif">${esc(w.hz)}</div>${SR.shown?'':'<p class="muted small" style="margin:6px 0 0">Tự nhớ nghĩa rồi bấm hiện đáp án</p>'}</div>
-      ${SR.shown?`<div style="border-top:1px dashed var(--line);padding:14px;display:flex;flex-direction:column;gap:10px">
-        <div class="row" style="justify-content:space-between"><div><div style="font-size:1.25rem;color:var(--jade);font-weight:600">${esc(w.py)}</div><div style="font-size:1.1rem;font-weight:600">${esc(w.vi)}</div></div><span style="font-size:2rem">${esc(w.em||'')}</span></div>
-        ${w.ex?`<div style="background:var(--sunk);border-radius:10px;padding:10px 12px"><div style="font-family:'Noto Serif SC',serif;font-size:1.15rem;line-height:1.9">${segHTML(w.ex)}</div><div id="tok-info"></div><div class="small" style="color:var(--jade)">${esc(w.exp||'')}</div><div class="small muted">${esc(w.exv||'')}</div></div>`:''}
-        ${hanInfoHTML(w.hz)}
-        <div class="row" style="justify-content:center"><button class="btn sm" id="srs-play">🔊 Nghe giọng mẫu</button><button class="btn sm" id="srs-strk">✍ Thứ tự nét</button><button class="btn sm" data-wr="${esc(w.hz)}">🖌 Luyện viết chữ này</button>${w.ex?`<button class="btn sm" data-ws="${esc(w.ex)}">🖌 Viết câu ví dụ</button>`:''}</div>
-        <div id="srs-strokes"></div>
-        <div class="grades" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">${grades}</div></div>`
-      :`<div style="padding:0 14px 14px"><button class="btn pri" id="srs-show" style="width:100%">Hiện đáp án <small style="opacity:.7">(Space / Enter)</small></button></div>`}
+      <div style="text-align:center;padding:14px 14px 10px"><div style="font-size:5rem;line-height:1.1;font-family:'Noto Serif SC',serif">${esc(w.hz)}</div>
+        ${SR.shown?`<div style="margin-top:6px;color:var(--jade);font-weight:600;font-size:1.2rem">${esc(w.py)}</div><div style="font-size:1.15rem;font-weight:600;margin-top:4px">${esc(w.vi)} <span style="font-size:1.6rem">${esc(w.em||'')}</span></div>`:'<p class="muted small" style="margin:6px 0 0">Tự nhớ nghĩa rồi bấm hiện đáp án</p>'}
+      </div>
+      ${SR.shown?body:`<div style="padding:0 14px 14px"><button class="btn pri" id="srs-show" style="width:100%">Hiện đáp án <small style="opacity:.7">(Space / Enter)</small></button></div>`}
     </div>`;
   }
   return `<div class="row" style="justify-content:space-between;margin-bottom:8px"><h2>Ôn hôm nay</h2><span class="small muted">Còn ${left} từ mới hôm nay</span></div>
@@ -1142,14 +1159,17 @@ function srsDeckCard(){
      <div style="height:6px;border-radius:99px;background:var(--line);overflow:hidden;margin-top:8px"><i style="display:block;height:100%;width:${pct}%;background:var(--jade)"></i></div></div>
    ${forecastHTML()}
    ${card}
-   <p class="muted small" style="margin-top:10px">Phím tắt: <b>Space</b> hoặc <b>Enter</b> để hiện đáp án, rồi <b>1</b> Lại · <b>2</b> Khó · <b>3</b> Được · <b>4</b> Dễ. Nghĩ trước khi xem đáp án, rồi chấm trung thực.</p>`;
+   <p class="muted small" style="margin-top:10px">Phím tắt: <b>Space</b>/<b>Enter</b> hiện đáp án · <b>1</b> Lại · <b>2</b> Khó · <b>3</b> Tốt · <b>4</b> Dễ · <b>S</b> nghe mẫu · <b>E</b> nghe câu ví dụ · <b>Z</b> hoàn tác. Nghĩ trước khi xem đáp án, rồi chấm trung thực.</p>`;
 }
 function renderSRS(){
   V.innerHTML=srsDeckCard();
   bindTokens();
+  const w=SR.cur;
+  if(w&&SR.shown){ const p=$('#srs-prac'); if(p) bindPractice(p,srsTg(w)); }
+  else { CUR=null; micUI(false); }
   const sh=$('#srs-show'); if(sh) sh.onclick=()=>{ SR.shown=true; renderSRS(); if(SR.cur) playRef(SR.cur.hz); };
   const sk=$('#srs-strk'); if(sk) sk.onclick=()=>showStrokes(SR.cur.hz);
-  const pl=$('#srs-play'); if(pl) pl.onclick=()=>{ if(SR.cur) playRef(SR.cur.hz); };
+  const ex=$('#srs-exs'); if(ex) ex.onclick=()=>{ if(SR.cur&&SR.cur.ex) playRef(SR.cur.ex); };
   V.querySelectorAll('[data-g]').forEach(b=>b.onclick=()=>srsGrade(+b.dataset.g));
 }
 
