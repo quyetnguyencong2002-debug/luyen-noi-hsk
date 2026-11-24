@@ -1,6 +1,6 @@
 // Bộ nhớ đệm: giao diện lấy mạng trước (để cập nhật nhanh), dữ liệu & giọng mẫu lấy bộ nhớ trước (dùng được khi mất mạng)
-const C='luyennoi-v17';
-self.addEventListener('install',e=>{ e.waitUntil(caches.open(C).then(c=>c.addAll(['./','index.html','app.js?v=17','pitch.js','lib/speech-sdk.min.js','data/hsk.json','data/dlg.json','manifest.json','icon.svg']))); self.skipWaiting(); });
+const C='luyennoi-v18';
+self.addEventListener('install',e=>{ e.waitUntil(caches.open(C).then(c=>c.addAll(['./','index.html','app.js?v=18','pitch.js','lib/speech-sdk.min.js','data/hsk.json','data/dlg.json','manifest.json','icon.svg']))); self.skipWaiting(); });
 self.addEventListener('activate',e=>{ e.waitUntil(self.clients.claim()); });
 self.addEventListener('fetch',e=>{ const u=new URL(e.request.url); if(e.request.method!=='GET'||u.origin!==location.origin) return;
   const heavy=/\/(audio|data|lib)\//.test(u.pathname);
